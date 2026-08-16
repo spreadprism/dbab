@@ -1,5 +1,11 @@
 # dbab.nvim
 
+> [!WARNING]
+> **Disclaimer:** The original upstream repository has been deleted and now
+> returns a **404**. This is a copy recovered from my local Nix store, preserved
+> here for archival and continued use. It is not the official source and may not
+> reflect any later changes the original author may have made.
+
 A lightweight database client for Neovim. Query databases directly from your editor.
 
 ![dbab.nvim](./screenshots/main.png)
