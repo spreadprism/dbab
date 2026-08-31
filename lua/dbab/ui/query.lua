@@ -3,6 +3,7 @@ local connection = require("dbab.core.connection")
 local parser = require("dbab.utils.parser")
 local storage = require("dbab.core.storage")
 local query_history = require("dbab.core.history")
+local selection = require("dbab.utils.selection")
 
 local function get_history_ui()
 	return require("dbab.ui.history")
@@ -143,17 +144,31 @@ function M.open_saved_query(query_name, content, conn_name)
 	end
 end
 
-function M.execute_query()
+---@class Dbab.ExecuteOpts
+---@field query string|nil Explicit query text to run instead of the buffer contents
+---@field visual boolean|nil Run only the current visual selection
+
+---@param opts Dbab.ExecuteOpts|nil
+function M.execute_query(opts)
+	opts = opts or {}
+
 	if not workbench.editor_buf or not vim.api.nvim_buf_is_valid(workbench.editor_buf) then
 		return
 	end
 
-	local lines = vim.api.nvim_buf_get_lines(workbench.editor_buf, 0, -1, false)
-	local query = table.concat(lines, "\n")
-	query = vim.trim(query)
+	local query
+	if opts.query then
+		query = opts.query
+	elseif opts.visual then
+		query = selection.get_visual(workbench.editor_buf)
+	else
+		local lines = vim.api.nvim_buf_get_lines(workbench.editor_buf, 0, -1, false)
+		query = table.concat(lines, "\n")
+	end
+	query = vim.trim(query or "")
 
 	if query == "" then
-		vim.notify("[dbab] Empty query", vim.log.levels.WARN)
+		vim.notify(opts.visual and "[dbab] Empty selection" or "[dbab] Empty query", vim.log.levels.WARN)
 		return
 	end
 

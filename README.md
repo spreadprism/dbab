@@ -20,6 +20,7 @@ A lightweight database client for Neovim. Query databases directly from your edi
 - **Multiple query tabs**: Work with multiple queries simultaneously
 - **Save queries**: Store frequently used queries per connection
 - **Result viewer**: Multiple display styles (table, json, vertical, markdown, raw) with type-aware highlighting
+- **Sticky header**: Column names stay pinned while you scroll through results
 
 ## Layout
 
@@ -140,7 +141,8 @@ require("blink.cmp").setup({
 
 | Key | Action |
 |-----|--------|
-| `<CR>` | Execute query |
+| `<CR>` | Execute query (whole buffer) |
+| `<CR>` (visual) | Execute selected text only |
 | `<C-s>` | Save query |
 | `gt` / `gT` | Next / Previous tab |
 | `<Leader>w` | Close tab |
@@ -197,15 +199,16 @@ require("dbab").setup({
     show_brand_name = false,  -- true: show [postgres] label, false: icon + name only
     show_system_schemas = true,
   },
-  editor = {
-    show_tabbar = true,       -- show tab bar above editor
-  },
+    editor = {
+      show_tabbar = true,       -- show tab bar above editor
+    },
   result = {
     max_width = 120,
     max_height = 20,
     show_line_number = true,
     header_align = "fit",     -- "fit" or "full"
     style = "table",          -- "table", "json", "raw", "vertical", "markdown"
+    sticky_header = true,     -- Pin column header while scrolling (table style)
   },
   history = {
     width = 0.2,
@@ -244,6 +247,7 @@ require("dbab").setup({
       to_result = "<S-Tab>",
     },
     editor = {
+      execute_visual = "<CR>",
       execute_insert = "<C-CR>",
       execute_leader = "<Leader>r",
       save = "<C-s>",

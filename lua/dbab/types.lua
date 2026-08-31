@@ -43,6 +43,7 @@
 ---@field show_line_number boolean Show line numbers in result grid
 ---@field header_align Dbab.HeaderAlign Winbar metadata alignment ("fit" = align to grid, "full" = align to window edge)
 ---@field style? Dbab.ResultStyle Result display style
+---@field sticky_header? boolean Pin the column header to the top of the result pane while scrolling
 
 ---@alias Dbab.HistoryField "icon"|"time"|"dbname"|"query"|"duration"
 
@@ -91,6 +92,7 @@
 ---@field to_result string Move focus to result
 
 ---@class Dbab.EditorKeymaps
+---@field execute_visual string Execute only the visual selection (visual mode)
 ---@field execute_insert string Execute query in insert mode
 ---@field execute_leader string Execute query with leader
 ---@field save string Save current query

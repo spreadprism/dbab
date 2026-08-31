@@ -60,6 +60,12 @@ function M.setup_editor_keymaps(buf)
 		workbench.execute_query()
 	end, opts)
 
+	vim.keymap.set("x", keymaps.execute_visual or config.get().keymaps.execute, function()
+		local query = require("dbab.utils.selection").get_visual(buf)
+		require("dbab.utils.selection").exit_visual()
+		workbench.execute_query({ query = query, visual = true })
+	end, opts)
+
 	vim.keymap.set("i", keymaps.execute_insert, function()
 		workbench.execute_query()
 	end, opts)

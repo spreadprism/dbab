@@ -1,6 +1,7 @@
 local parser = require("dbab.utils.parser")
 local config = require("dbab.config")
 local icons = require("dbab.ui.icons")
+local sticky = require("dbab.ui.sticky")
 
 local M = {}
 
@@ -261,6 +262,10 @@ function M.show_result(raw, elapsed)
 
 	vim.bo[workbench.result_buf].modifiable = true
 
+	-- Cleared up front: every branch below that is not a table grid has no
+	-- header line for the float to stand in for.
+	sticky.set_header(nil)
+
 	if is_error_result(raw) then
 		local lines, highlights = format_error(raw)
 
@@ -419,6 +424,9 @@ function M.show_result(raw, elapsed)
 
 	apply_highlights(workbench.result_buf, result, widths, has_header)
 
+	-- A new result changes the header text, and the float is not otherwise told.
+	sticky.set_header(has_header and lines[1] or nil)
+
 	require("dbab.ui.winbar").refresh_result()
 
 	local status = string.format(" Result: %d rows (%.1fms) ", result.row_count, elapsed)
@@ -428,6 +436,7 @@ function M.show_result(raw, elapsed)
 		vim.api.nvim_set_current_win(workbench.result_win)
 		pcall(vim.api.nvim_win_set_cursor, workbench.result_win, { 2, 0 })
 		vim.cmd("stopinsert")
+		sticky.follow(workbench.result_win)
 	end
 end
 
@@ -477,6 +486,7 @@ function M.yank_all_rows()
 end
 
 function M.cleanup()
+	sticky.cleanup()
 	M.last_result = nil
 	M.last_query = nil
 	M.last_duration = nil

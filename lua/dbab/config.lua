@@ -44,6 +44,7 @@ M.defaults = {
 		show_line_number = true,
 		header_align = "fit",
 		style = "table",
+		sticky_header = true,
 	},
 	history = {
 		width = 0.2,
@@ -86,6 +87,7 @@ M.defaults = {
 		},
 
 		editor = {
+			execute_visual = "<CR>",
 			execute_insert = "<C-CR>",
 			execute_leader = "<Leader>r",
 			save = "<C-s>",

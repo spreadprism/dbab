@@ -252,8 +252,9 @@ function M.show_result(raw, elapsed)
 	result.show_result(raw, elapsed)
 end
 
-function M.execute_query()
-	query.execute_query()
+---@param opts Dbab.ExecuteOpts|nil
+function M.execute_query(opts)
+	query.execute_query(opts)
 end
 
 function M.save_query_by_buf(buf, callback)
@@ -426,6 +427,9 @@ function M._init_all_components(windows)
 		vim.wo[M.result_win].number = cfg.result.show_line_number
 		vim.wo[M.result_win].relativenumber = false
 		M.setup_result_keymaps()
+		require("dbab.ui.sticky").attach(M.result_buf, function()
+			return M.result_win
+		end)
 		vim.schedule(function()
 			M.refresh_result_winbar()
 		end)
@@ -459,6 +463,9 @@ function M._setup_autocmds()
 			end
 
 			local closed_win = tonumber(ev.match)
+			if closed_win == M.result_win then
+				require("dbab.ui.sticky").hide()
+			end
 			if closed_win == M.editor_win then
 				M.editor_win = nil
 				M.editor_buf = nil
@@ -483,6 +490,7 @@ function M._setup_autocmds()
 				M._resize_layout()
 				get_history_ui().render()
 				M.refresh_result_winbar()
+				require("dbab.ui.sticky").follow(M.result_win)
 			end
 		end,
 	})
@@ -493,6 +501,7 @@ function M._setup_autocmds()
 			if M.tab_nr and vim.api.nvim_get_current_tabpage() == M.tab_nr then
 				get_history_ui().render()
 				M.refresh_result_winbar()
+				require("dbab.ui.sticky").follow(M.result_win)
 			end
 		end,
 	})

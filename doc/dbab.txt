@@ -153,6 +153,8 @@ result ~
         - `"raw"`: Raw CLI output
         - `"vertical"`: One column per line (like psql \x)
         - `"markdown"`: Markdown table
+    - `sticky_header`: Pin column header while scrolling (default: true)
+        Only applies to the "table" style.
 
                                                            *dbab-config-history*
 history ~
@@ -202,8 +204,9 @@ keymaps ~
     - `history.to_sidebar`: Move focus to sidebar (default: "<Tab>")
     - `history.to_result`: Move focus to result (default: "<S-Tab>")
 
-    Editor:
-    - `editor.execute_insert`: Execute in insert mode (default: "<C-CR>")
+     Editor:
+     - `editor.execute_visual`: Execute visual selection (default: "<CR>")
+     - `editor.execute_insert`: Execute in insert mode (default: "<C-CR>")
     - `editor.execute_leader`: Execute with leader (default: "<Leader>r")
     - `editor.save`: Save query (default: "<C-s>")
     - `editor.next_tab`: Next query tab (default: "gt")
@@ -301,7 +304,8 @@ SIDEBAR KEYMAPS                                          *dbab-keymaps-sidebar*
 
 EDITOR KEYMAPS                                            *dbab-keymaps-editor*
 
-    `<CR>`              Execute query (normal mode)
+    `<CR>`              Execute whole buffer (normal mode)
+    `<CR>`              Execute selection only (visual mode)
     `<C-CR>`            Execute query (insert mode)
     `<C-s>`             Save current query
     `gt`                Next tab
