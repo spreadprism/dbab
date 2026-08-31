@@ -154,7 +154,9 @@ result ~
         - `"vertical"`: One column per line (like psql \x)
         - `"markdown"`: Markdown table
     - `sticky_header`: Pin column header while scrolling (default: true)
-        Only applies to the "table" style.
+         Only applies to the "table" style.
+    - `focus_on_execute`: Move cursor to result pane after running a
+         query (default: false)
 
                                                            *dbab-config-history*
 history ~

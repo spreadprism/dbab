@@ -126,8 +126,31 @@ end
 
 ---@param raw string
 ---@return boolean
+--- Each client announces failure differently:
+---   postgres  ERROR:  relation "nope" does not exist
+---   mysql     ERROR 1146 (42S02) at line 1: Table 'db.nope' doesn't exist
+---   sqlite3   Error: no such table: nope
+local ERROR_PATTERNS = {
+	"^ERROR:",
+	"\nERROR:",
+	"^ERROR %d+ ",
+	"\nERROR %d+ ",
+	"^Error: ",
+	"\nError: ",
+	"^Parse error",
+	"\nParse error",
+	"syntax error",
+}
+
+---@param raw string
+---@return boolean
 local function is_error_result(raw)
-	return raw:match("^ERROR:") or raw:match("\nERROR:") or raw:match("syntax error")
+	for _, pattern in ipairs(ERROR_PATTERNS) do
+		if raw:match(pattern) then
+			return true
+		end
+	end
+	return false
 end
 
 ---@param raw string
@@ -433,9 +456,15 @@ function M.show_result(raw, elapsed)
 	vim.notify(status, vim.log.levels.INFO)
 
 	if workbench.result_win and vim.api.nvim_win_is_valid(workbench.result_win) then
-		vim.api.nvim_set_current_win(workbench.result_win)
+		-- Cursor is placed on the first data row either way; focus only follows
+		-- it when the user asked for that.
 		pcall(vim.api.nvim_win_set_cursor, workbench.result_win, { 2, 0 })
-		vim.cmd("stopinsert")
+
+		if cfg.result.focus_on_execute then
+			vim.api.nvim_set_current_win(workbench.result_win)
+			vim.cmd("stopinsert")
+		end
+
 		sticky.follow(workbench.result_win)
 	end
 end

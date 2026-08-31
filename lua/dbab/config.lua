@@ -45,6 +45,7 @@ M.defaults = {
 		header_align = "fit",
 		style = "table",
 		sticky_header = true,
+		focus_on_execute = false,
 	},
 	history = {
 		width = 0.2,

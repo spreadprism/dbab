@@ -44,6 +44,7 @@
 ---@field header_align Dbab.HeaderAlign Winbar metadata alignment ("fit" = align to grid, "full" = align to window edge)
 ---@field style? Dbab.ResultStyle Result display style
 ---@field sticky_header? boolean Pin the column header to the top of the result pane while scrolling
+---@field focus_on_execute? boolean Move the cursor to the result pane after running a query
 
 ---@alias Dbab.HistoryField "icon"|"time"|"dbname"|"query"|"duration"
 

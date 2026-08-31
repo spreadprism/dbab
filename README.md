@@ -209,6 +209,7 @@ require("dbab").setup({
     header_align = "fit",     -- "fit" or "full"
     style = "table",          -- "table", "json", "raw", "vertical", "markdown"
     sticky_header = true,     -- Pin column header while scrolling (table style)
+    focus_on_execute = false, -- Move cursor to result pane after running a query
   },
   history = {
     width = 0.2,

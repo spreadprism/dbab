@@ -9,6 +9,62 @@ local function use_dadbod()
 	return config.get().executor == "dadbod"
 end
 
+--- Lines the client writes to stderr that are not part of the result.
+---
+--- `systemlist` merges stderr into stdout, so MySQL's password warning arrives
+--- as line 1 of the output. Downstream parsers sniff the first line to decide
+--- which format they are looking at (a tab means MySQL, a `-`/`+` rule means
+--- PostgreSQL), so an unstripped warning makes every one of them misread the
+--- whole result -- and silently return nothing.
+local NOISE_PATTERNS = {
+	"^mysql: %[Warning%]", -- mysql 8.x
+	"^mariadb: %[Warning%]", -- mariadb
+	"^Warning: Using a password on the command line", -- mysql 5.x
+}
+
+--- Strip client noise from raw command output.
+---@param output string
+---@return string
+function M.strip_noise(output)
+	if output == nil or output == "" then
+		return output or ""
+	end
+
+	local kept = vim.tbl_filter(function(line)
+		for _, pattern in ipairs(NOISE_PATTERNS) do
+			if line:match(pattern) then
+				return false
+			end
+		end
+		return true
+	end, vim.split(output, "\n"))
+
+	return table.concat(kept, "\n")
+end
+
+--- Shared completion path for both async backends.
+---@param stdout string[]
+---@param stderr string[]
+---@param code number
+---@param callback fun(result: string, err: string|nil)
+local function finish_job(stdout, stderr, code, callback)
+	vim.schedule(function()
+		local result = M.strip_noise(table.concat(stdout, "\n"))
+		local err = #stderr > 0 and M.strip_noise(table.concat(stderr, "\n")) or nil
+
+		-- Stripping can leave a stderr stream that held nothing but warnings.
+		if err ~= nil and vim.trim(err) == "" then
+			err = nil
+		end
+
+		if code ~= 0 and err then
+			callback("", err)
+		else
+			callback(result, nil)
+		end
+	end)
+end
+
 -- ============================================
 -- CLI backend
 -- ============================================
@@ -27,7 +83,7 @@ local function cli_execute(url, query)
 
 	-- Use list form to avoid shell expansion (e.g. '?' in URLs under zsh)
 	local lines = vim.fn.systemlist(cmd_list, query)
-	return table.concat(lines, "\n")
+	return M.strip_noise(table.concat(lines, "\n"))
 end
 
 ---@param url string
@@ -67,16 +123,7 @@ local function cli_execute_async(url, query, callback)
 			end
 		end,
 		on_exit = function(_, return_val)
-			vim.schedule(function()
-				local result = table.concat(stdout_results, "\n")
-				local err = #stderr_results > 0 and table.concat(stderr_results, "\n") or nil
-
-				if return_val ~= 0 and err then
-					callback("", err)
-				else
-					callback(result, nil)
-				end
-			end)
+			finish_job(stdout_results, stderr_results, return_val, callback)
 		end,
 	}):start()
 end
@@ -122,7 +169,7 @@ end
 local function dadbod_execute(url, query)
 	local cmd = dadbod_get_cmd(url)
 	local lines = vim.fn["db#systemlist"](cmd, query)
-	return table.concat(lines, "\n")
+	return M.strip_noise(table.concat(lines, "\n"))
 end
 
 ---@param url string
@@ -182,16 +229,7 @@ local function dadbod_execute_async(url, query, callback)
 			end
 		end,
 		on_exit = function(_, return_val)
-			vim.schedule(function()
-				local result = table.concat(stdout_results, "\n")
-				local err = #stderr_results > 0 and table.concat(stderr_results, "\n") or nil
-
-				if return_val ~= 0 and err then
-					callback("", err)
-				else
-					callback(result, nil)
-				end
-			end)
+			finish_job(stdout_results, stderr_results, return_val, callback)
 		end,
 	}):start()
 end
