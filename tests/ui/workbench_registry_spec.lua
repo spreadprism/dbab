@@ -116,7 +116,7 @@ describe("workbench registry", function()
 			wb:cleanup()
 		end)
 
-		assert.is_true(ok, tostring(err))
+		assert(ok, tostring(err))
 		assert.is_nil(workbench.get("alpha"))
 	end)
 

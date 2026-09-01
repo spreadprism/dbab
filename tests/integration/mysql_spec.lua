@@ -64,7 +64,7 @@ end
 describe("mysql integration", function()
 	if not reachable then
 		it("is skipped", function()
-			pending("mysql integration tests skipped: " .. reason)
+			pending("mysql integration tests skipped: " .. reason, function() end)
 		end)
 		return
 	end

@@ -32,7 +32,10 @@ local ok_pg = vim.fn.executable("psql") == 1 and reachable(PG_URL)
 describe("multiple workbenches", function()
 	if not (ok_mysql and ok_pg) then
 		it("is skipped", function()
-			pending(("needs both databases (mysql: %s, postgres: %s)"):format(tostring(ok_mysql), tostring(ok_pg)))
+			pending(
+				("needs both databases (mysql: %s, postgres: %s)"):format(tostring(ok_mysql), tostring(ok_pg)),
+				function() end
+			)
 		end)
 		return
 	end

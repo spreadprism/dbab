@@ -37,7 +37,7 @@ local reachable, reason = probe()
 describe("mysql error reporting", function()
 	if not reachable then
 		it("is skipped", function()
-			pending("mysql integration tests skipped: " .. reason)
+			pending("mysql integration tests skipped: " .. reason, function() end)
 		end)
 		return
 	end
@@ -169,7 +169,7 @@ describe("mysql error reporting", function()
 				return done
 			end)
 
-			assert.is_true(done, "async callback never fired")
+			assert(done, "async callback never fired")
 			assert.is_not_nil(err)
 			assert.is_not_nil(err:match("ERROR 1146"))
 			assert.are.equal("", result)
@@ -186,7 +186,7 @@ describe("mysql error reporting", function()
 				return done
 			end)
 
-			assert.is_true(done, "async callback never fired")
+			assert(done, "async callback never fired")
 			assert.is_not_nil(err)
 			assert.is_not_nil(err:match("Can't connect to MySQL server"))
 		end)

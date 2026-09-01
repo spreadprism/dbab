@@ -40,12 +40,14 @@ local function strip_noise(query)
 	return out
 end
 
+--- Collapse whitespace but keep the original case: identifiers are extracted
+--- from this, and on Linux MySQL table names are case-sensitive.
 ---@param query string
 ---@return string
 local function normalize(query)
 	local collapsed = strip_noise(query):gsub("%s+", " "):gsub(";%s*$", "")
 
-	return vim.trim(collapsed):lower()
+	return vim.trim(collapsed)
 end
 
 --- Split a select list on top-level commas only, so `coalesce(a, b)` stays whole.
@@ -86,7 +88,7 @@ local function bare_column(item)
 
 	-- An alias means the rendered header no longer names the column, so we
 	-- cannot map a grid column back to a real one.
-	if text:match("%f[%w]as%f[%W]") or text:match("[%(%)%+%*/%-]") or text:match("::") then
+	if text:lower():match("%f[%w]as%f[%W]") or text:match("[%(%)%+%*/%-]") or text:match("::") then
 		return nil
 	end
 
@@ -112,29 +114,41 @@ function M.analyze(query)
 	end
 
 	local sql = normalize(query)
+	-- Keyword matching happens against a lowered copy; every identifier is taken
+	-- from `sql` at the same offsets, so its case survives.
+	local lower = sql:lower()
 
 	-- More than one statement: we would not know which produced the grid.
 	if sql:find(";") then
 		return { editable = false, reason = "multiple statements", star = false }
 	end
 
-	if not sql:match("^select%f[%W]") then
+	if not lower:match("^select%f[%W]") then
 		return { editable = false, reason = "not a SELECT", star = false }
 	end
 
 	for _, rule in ipairs(DISQUALIFIERS) do
-		if sql:match(rule.pattern) then
+		if lower:match(rule.pattern) then
 			return { editable = false, reason = rule.reason, star = false }
 		end
 	end
 
-	local select_list, from_rest = sql:match("^select%s+(.-)%s+from%s+(.+)$")
-	if not select_list or not from_rest then
+	local _, select_start = lower:find("^select%s+")
+	local from_start, from_end = nil, nil
+	if select_start then
+		from_start, from_end = lower:find("%s+from%s+", select_start)
+	end
+
+	if not select_start or not from_start then
 		return { editable = false, reason = "no FROM clause", star = false }
 	end
 
+	local select_list = sql:sub(select_start + 1, from_start - 1)
+	local from_rest = sql:sub(from_end + 1)
+	local select_lower = select_list:lower()
+
 	for _, fn in ipairs(AGGREGATES) do
-		if select_list:match("%f[%w]" .. fn .. "%s*%(") then
+		if select_lower:match("%f[%w]" .. fn .. "%s*%(") then
 			return { editable = false, reason = "query aggregates rows", star = false }
 		end
 	end
@@ -152,18 +166,18 @@ function M.analyze(query)
 	end
 
 	local tail = from_rest:sub(#table_ref + 1)
-	if tail:match("%f[%w]as%f[%W]") or tail:match("^%s+[%w_]+%s*$") or tail:match("^%s+[%w_]+%s") then
-		-- A table alias is harmless for identifying the table, but the columns in
-		-- the select list may then be alias-qualified. Allow it: `bare_column`
-		-- already reduces `t.name` to `name`.
-		local first = tail:match("^%s+([%w_]+)")
-		local KEEP = { where = true, order = true, limit = true, offset = true, fetch = true, ["for"] = true }
-		if first and not KEEP[first] then
-			tail = tail:gsub("^%s+[%w_]+", "", 1)
-		end
+	local tail_lower = tail:lower()
+
+	-- A table alias is harmless for identifying the table, and `bare_column`
+	-- already reduces `t.name` to `name`.
+	local first = tail_lower:match("^%s+([%w_]+)")
+	local KEEP = { where = true, order = true, limit = true, offset = true, fetch = true, ["for"] = true, group = true }
+	if first and not KEEP[first] then
+		tail = tail:gsub("^%s+[%w_]+", "", 1)
+		tail_lower = tail:lower()
 	end
 
-	if tail:match("%f[%w]join%f[%W]") then
+	if tail_lower:match("%f[%w]join%f[%W]") then
 		return { editable = false, reason = "query joins tables", star = false }
 	end
 

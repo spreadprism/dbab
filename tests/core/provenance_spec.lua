@@ -51,7 +51,24 @@ describe("provenance", function()
 			local a = provenance.analyze("  select   Id\n  from   Users  ")
 
 			assert.is_true(a.editable)
-			assert.are.equal("users", a.table_name)
+			-- Case is preserved: MySQL table names are case-sensitive on Linux, so
+			-- lowercasing the identifier makes the schema lookup miss.
+			assert.are.equal("Users", a.table_name)
+			assert.are.same({ "Id" }, a.columns)
+		end)
+
+		it("preserves a schema's case too", function()
+			local a = provenance.analyze("SELECT id FROM MySchema.MyTable")
+
+			assert.are.equal("MySchema", a.schema)
+			assert.are.equal("MyTable", a.table_name)
+		end)
+
+		it("still matches keywords regardless of case", function()
+			local a = provenance.analyze("SELECT a.id FROM a InNeR JoIn b ON a.id = b.a_id")
+
+			assert.is_false(a.editable)
+			assert.is_not_nil(a.reason:find("joins", 1, true))
 		end)
 	end)
 

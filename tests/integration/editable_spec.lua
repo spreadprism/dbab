@@ -38,7 +38,7 @@ end
 describe("editable grid", function()
 	if #targets == 0 then
 		it("is skipped", function()
-			pending("no reachable database")
+			pending("no reachable database", function() end)
 		end)
 		return
 	end
@@ -119,7 +119,7 @@ describe("editable grid", function()
 
 				local ok, err = editable.apply(wb.result_buf, statements)
 
-				assert.is_true(ok, tostring(err))
+				assert(ok, tostring(err))
 				assert.is_not_nil(table_state():find("ADA", 1, true))
 			end)
 
@@ -128,7 +128,7 @@ describe("editable grid", function()
 				retype(1, "first", "NULL")
 
 				local ok, err = editable.apply(wb.result_buf, editable.statements(wb.result_buf))
-				assert.is_true(ok, tostring(err))
+				assert(ok, tostring(err))
 
 				local after = executor.execute(target.url, "SELECT COUNT(*) AS n FROM dbab_edit WHERE note IS NULL;")
 
@@ -141,7 +141,7 @@ describe("editable grid", function()
 
 				local ok, err = editable.apply(wb.result_buf, editable.statements(wb.result_buf))
 
-				assert.is_true(ok, tostring(err))
+				assert(ok, tostring(err))
 				assert.is_not_nil(table_state():find("O'Brien", 1, true))
 			end)
 
@@ -172,6 +172,7 @@ describe("editable grid", function()
 				-- The confirmation is asynchronous: run a different query before
 				-- answering it.
 				local original_input = vim.ui.input
+				---@diagnostic disable-next-line: duplicate-set-field
 				vim.ui.input = function(_, cb)
 					vim.api.nvim_buf_set_lines(wb.editor_buf, 0, -1, false, { "SELECT id, name FROM dbab_edit2 ORDER BY id;" })
 					query_ui.execute_query()

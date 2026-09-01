@@ -33,7 +33,7 @@ local reachable, reason = probe()
 describe("postgres null handling", function()
 	if not reachable then
 		it("is skipped", function()
-			pending("postgres integration tests skipped: " .. reason)
+			pending("postgres integration tests skipped: " .. reason, function() end)
 		end)
 		return
 	end

@@ -81,7 +81,7 @@ describe("workbench connection context", function()
 		executor.execute = original
 		vim.api.nvim_buf_delete(buf, { force = true })
 
-		assert.is_true(ok, tostring(err))
+		assert(ok, tostring(err))
 		assert.are.equal("sqlite:///tmp/dbab_beta.sqlite", seen_url)
 	end)
 
