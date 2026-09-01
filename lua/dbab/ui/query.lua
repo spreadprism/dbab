@@ -188,7 +188,7 @@ function M.execute_query(opts)
 	local result = executor.execute(url, query)
 	local elapsed = (vim.loop.hrtime() - start_time) / 1e6
 
-	local parsed_result = parser.parse(result)
+	local parsed_result = parser.parse(result, nil, connection.parse_type(url))
 	query_history.add({
 		query = query,
 		timestamp = os.time(),

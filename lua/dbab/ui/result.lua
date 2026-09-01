@@ -124,8 +124,6 @@ local function apply_highlights(bufnr, result, widths, has_header)
 	end
 end
 
----@param raw string
----@return boolean
 --- Each client announces failure differently:
 ---   postgres  ERROR:  relation "nope" does not exist
 ---   mysql     ERROR 1146 (42S02) at line 1: Table 'db.nope' doesn't exist
@@ -141,6 +139,20 @@ local ERROR_PATTERNS = {
 	"\nParse error",
 	"syntax error",
 }
+
+--- Dialect of the active connection, so the parser does not have to guess the
+--- output format from the text alone.
+---@return string|nil
+local function active_db_type()
+	local connection = require("dbab.core.connection")
+	local url = connection.get_active_url()
+	if not url then
+		return nil
+	end
+
+	local ok, db_type = pcall(connection.parse_type, url)
+	return ok and db_type or nil
+end
 
 ---@param raw string
 ---@return boolean
@@ -344,7 +356,7 @@ function M.show_result(raw, elapsed)
 	end
 
 	local result_style = cfg.result.style or "table"
-	local result = parser.parse(raw, result_style)
+	local result = parser.parse(raw, result_style, active_db_type())
 	M.last_result = result
 
 	pcall(vim.treesitter.stop, workbench.result_buf)

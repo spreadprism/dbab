@@ -4,8 +4,9 @@ local M = {}
 
 ---@param raw string Raw output from database
 ---@param style? Dbab.ResultStyle "table" (default), "json", "raw", "vertical", "markdown"
+---@param db_type? string Dialect hint ("mysql", "postgres", "sqlite")
 ---@return Dbab.QueryResult
-function M.parse(raw, style)
+function M.parse(raw, style, db_type)
 	local result = {
 		columns = {},
 		rows = {},
@@ -22,7 +23,7 @@ function M.parse(raw, style)
 		return result
 	end
 
-	local table_result = M.parse_table(raw)
+	local table_result = M.parse_table(raw, db_type)
 
 	if style == "json" then
 		local json_data = {}
@@ -116,8 +117,9 @@ function M.parse(raw, style)
 end
 
 ---@param raw string
+---@param db_type? string Dialect hint ("mysql", "postgres", "sqlite")
 ---@return Dbab.QueryResult
-function M.parse_table(raw)
+function M.parse_table(raw, db_type)
 	local lines = vim.split(raw, "\n")
 
 	lines = vim.tbl_filter(function(line)
@@ -139,7 +141,18 @@ function M.parse_table(raw)
 	local header_line = lines[1]
 	local separator_line = lines[2] or ""
 
-	if header_line:find("\t") then
+	-- MySQL batch output is tab separated, so a tab is normally enough to
+	-- recognise it. A single-column result (`SELECT COUNT(*)`, `SHOW DATABASES`)
+	-- has no tab to be recognised by, and would otherwise fall through to the
+	-- "unstructured text" branch below -- which turns the header into a data row
+	-- and names the column "result". So when the dialect is known, trust it.
+	local is_tab_separated = header_line:find("\t") ~= nil
+
+	if not is_tab_separated and db_type == "mysql" and header_line ~= "" and not separator_line:match("^[%-+]") then
+		is_tab_separated = true
+	end
+
+	if is_tab_separated then
 		result.columns = vim.split(header_line, "\t")
 		for i = 2, #lines do
 			local line = lines[i]

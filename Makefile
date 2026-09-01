@@ -1,4 +1,4 @@
-.PHONY: test test-file lint
+.PHONY: test test-file test-verbose test-integration lint
 
 # Run all tests
 test:
@@ -8,6 +8,12 @@ test:
 # Usage: make test-file FILE=tests/core/storage_spec.lua
 test-file:
 	nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedFile $(FILE)"
+
+# Run only the integration tests, which need a live server.
+# They are skipped automatically when none is reachable.
+# Override the target server with DBAB_TEST_MYSQL_URL.
+test-integration:
+	nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/integration/ {minimal_init = 'tests/minimal_init.lua'}"
 
 # Run tests with verbose output
 test-verbose:

@@ -55,7 +55,9 @@ function M.show(raw, elapsed)
 		M.current_popup = nil
 	end
 
-	local result = parser.parse(raw)
+	local connection = require("dbab.core.connection")
+	local active_url = connection.get_active_url()
+	local result = parser.parse(raw, nil, active_url and connection.parse_type(active_url) or nil)
 	M.current_result = result
 	M.cursor_row = 1
 	M.cursor_col = 1
