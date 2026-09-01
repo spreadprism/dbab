@@ -131,6 +131,20 @@ function M.refresh_result()
 
 		local suffix_parts = {}
 		local suffix_display_parts = {}
+
+		-- Whether this result can be written back, and why not when it cannot.
+		-- Surfaced before any write happens, so the affordance is never a
+		-- surprise.
+		local edit_state = require("dbab.ui.editable").state(workbench.result_buf)
+		if edit_state then
+			if edit_state.editable then
+				table.insert(suffix_parts, "%#DbabBoolean#" .. icons.editable .. " editable%*")
+				table.insert(suffix_display_parts, icons.editable .. " editable")
+			elseif edit_state.reason then
+				table.insert(suffix_parts, "%#Comment#" .. icons.read_only .. " " .. edit_state.reason .. "%*")
+				table.insert(suffix_display_parts, icons.read_only .. " " .. edit_state.reason)
+			end
+		end
 		if result.last_timestamp then
 			local time_str = os.date("%H:%M", result.last_timestamp)
 			table.insert(suffix_parts, "%#Comment#" .. icons.time .. " " .. time_str .. "%*")

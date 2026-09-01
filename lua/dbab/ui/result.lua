@@ -477,6 +477,10 @@ function M.show_result(raw, elapsed)
 
 	apply_highlights(workbench.result_buf, result, widths, has_header, spans)
 
+	-- Editing is earned by the query: a projection with a join or an aggregate
+	-- has no single row to write back to.
+	M.setup_editing(workbench.result_buf, result, spans, has_header and 1 or 0)
+
 	-- A new result changes the header text, and the float is not otherwise told.
 	sticky.set_header(workbench._state(), has_header and lines[1] or nil)
 
@@ -497,6 +501,122 @@ function M.show_result(raw, elapsed)
 
 		sticky.follow(workbench._state(), workbench.result_win)
 	end
+end
+
+---@param buf number
+---@param result Dbab.QueryResult
+---@param spans {from: number, to: number}[][]
+---@param header_offset number
+function M.setup_editing(buf, result, spans, header_offset)
+	local editable = require("dbab.ui.editable")
+	local connection = require("dbab.core.connection")
+
+	local conn_name, url = workbench.get_active_connection_context()
+	local _ = conn_name
+
+	if not url then
+		editable.detach(buf)
+		return
+	end
+
+	local state = editable.analyze(M.last_query or "", url, connection.parse_type(url), result)
+	editable.attach(buf, state, spans, header_offset)
+
+	if state.editable then
+		-- `acwrite` rather than `nofile`: `:w` is the gesture every Vim user
+		-- already has for "apply this", and it makes the buffer participate in
+		-- the "no write since last change" prompt, so closing the pane with
+		-- unsaved cell edits warns instead of losing them.
+		vim.bo[buf].buftype = "acwrite"
+		vim.bo[buf].modifiable = true
+		vim.bo[buf].modified = false
+		M.setup_write_command(buf)
+	else
+		vim.bo[buf].buftype = "nofile"
+		vim.bo[buf].modifiable = false
+	end
+end
+
+---@param buf number
+function M.setup_write_command(buf)
+	local group = vim.api.nvim_create_augroup(("DbabWrite%d"):format(buf), { clear = true })
+
+	vim.api.nvim_create_autocmd("BufWriteCmd", {
+		group = group,
+		buffer = buf,
+		callback = function()
+			M.commit(buf)
+		end,
+	})
+end
+
+--- Collect the edits, show them, and apply them only if the user agrees.
+---@param buf number
+function M.commit(buf)
+	local editable = require("dbab.ui.editable")
+
+	local statements, err = editable.statements(buf)
+
+	if err then
+		vim.notify("[dbab] Cannot write: " .. err, vim.log.levels.ERROR)
+		return
+	end
+
+	if #statements == 0 then
+		vim.bo[buf].modified = false
+		vim.notify("[dbab] No changes to write", vim.log.levels.INFO)
+		return
+	end
+
+	-- `vim.ui.input` is asynchronous and the world can move under it: the user
+	-- may run another query, switch workbench, or close the pane while the
+	-- prompt is up. Everything the callback needs is captured now, and checked
+	-- for staleness before a single statement runs.
+	local state = editable.state(buf)
+	local origin = workbench.current()
+
+	-- The user sees exactly what will run before anything runs: a mis-escaped
+	-- value becomes a visible statement rather than a silent data change.
+	local preview = table.concat(statements, "\n")
+	local prompt = ("%s\n\nApply %d statement%s? [y/N] "):format(preview, #statements, #statements == 1 and "" or "s")
+
+	vim.ui.input({ prompt = prompt }, function(answer)
+		if answer == nil or not answer:lower():match("^y") then
+			vim.notify("[dbab] Write cancelled", vim.log.levels.INFO)
+			return
+		end
+
+		if not vim.api.nvim_buf_is_valid(buf) or editable.state(buf) ~= state then
+			-- A different result now occupies this buffer. The statements were
+			-- built against the old one, so running them would write on behalf of
+			-- a grid the user is no longer looking at.
+			vim.notify("[dbab] Result changed while confirming; nothing was written", vim.log.levels.WARN)
+			return
+		end
+
+		local ok, apply_err = editable.apply(buf, statements)
+
+		if not ok then
+			-- The buffer stays dirty and the anchors stay put: the user's edits
+			-- must not be silently discarded because the write failed.
+			vim.notify("[dbab] Write failed: " .. tostring(apply_err), vim.log.levels.ERROR)
+			return
+		end
+
+		vim.bo[buf].modified = false
+		vim.notify(("[dbab] Applied %d statement%s"):format(#statements, #statements == 1 and "" or "s"))
+
+		-- Re-run the original query: triggers, defaults and coercions mean other
+		-- cells may have changed, and it rebuilds the anchors. Only safe while
+		-- the originating workbench is still the one on screen, since rendering
+		-- goes through the facade.
+		if origin and not origin.closed and workbench.current() == origin then
+			local raw = require("dbab.core.executor").execute(state.url, state.query)
+			M.show_result(raw, 0)
+		else
+			vim.notify("[dbab] Re-run the query to see the updated rows", vim.log.levels.INFO)
+		end
+	end)
 end
 
 function M.yank_current_row()

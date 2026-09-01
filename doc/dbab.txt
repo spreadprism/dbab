@@ -9,8 +9,9 @@ CONTENTS                                                        *dbab-contents*
     4. Configuration ........................... |dbab-configuration|
     5. Commands ................................ |dbab-commands|
     6. Keymaps ................................. |dbab-keymaps|
-    7. Highlights .............................. |dbab-highlights|
-    8. Types ................................... |dbab-types|
+    7. Editing ................................. |dbab-editing|
+    8. Highlights .............................. |dbab-highlights|
+    9. Types ................................... |dbab-types|
 
 ==============================================================================
 INTRODUCTION                                                *dbab-introduction*
@@ -369,6 +370,51 @@ RESULT KEYMAPS                                            *dbab-keymaps-result*
     `<Tab>`             Move focus to sidebar
     `<S-Tab>`           Move focus to editor
     `q`                 Close dbab
+
+==============================================================================
+EDITING                                                          *dbab-editing*
+
+Results from simple single-table queries can be edited directly in the result
+pane. After making changes, press `:w` to confirm and apply them to the
+database.
+
+EDITABILITY REQUIREMENTS                          *dbab-editing-requirements*
+
+A result is editable only if ALL of these conditions hold:
+
+- a single `FROM <table>` with no join of any kind
+- no GROUP BY, HAVING, DISTINCT, UNION, INTERSECT, EXCEPT, CTE, window
+  function or aggregate
+- no subquery in FROM
+- the select list is `*` or plain column references (no expressions, aliases
+  or casts)
+- the table has a primary key, and every key column is present in the result
+
+The winbar shows an "editable" indicator when editing is allowed, or the
+reason why a result is read-only (e.g., "query aggregates rows", "table has
+no primary key").
+
+WORKFLOW                                               *dbab-editing-workflow*
+
+1. Execute a qualifying query
+2. Edit cell values in place using ordinary Vim motions
+3. Press `:w` to apply the changes
+4. dbab shows the exact SQL it will run and asks `Apply N statements? [y/N]`
+5. Confirm with `y` to run the statements behind a one-row guard and re-run
+   the original query
+
+EDITING RULES AND CAVEATS                           *dbab-editing-caveats*
+
+- The exact unquoted text `NULL` means SQL NULL. A literal string 'NULL'
+  cannot be typed into the grid.
+- Padding is stripped on read, so a value cannot end in a space.
+- One UPDATE is generated per edited row, with a multi-column SET.
+- The WHERE clause always uses the row's ORIGINAL key value, so editing a
+  key column works.
+- Adding or deleting whole lines is refused — re-run the query and edit
+  cells in place.
+- If the row no longer matches exactly once (it changed or was deleted behind
+  your back) the write is aborted and rolled back; nothing is written.
 
 ==============================================================================
 HIGHLIGHTS                                                    *dbab-highlights*

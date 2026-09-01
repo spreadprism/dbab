@@ -99,10 +99,14 @@ describe("multiple workbenches", function()
 			return t.name
 		end, schema.get_tables(mysql.url, "testdb"))
 
-		-- The mysql fixture has a Users table; postgres' testdb is empty. The
-		-- caches are keyed by URL, so the two never bleed into one another.
+		-- The mysql fixture has a Users table. The caches are keyed by URL, so
+		-- the two never bleed into one another.
 		assert.is_true(vim.tbl_contains(mysql_names, "Users"))
-		assert.are.same({}, schema.get_tables(pg.url, "public"))
+
+		local pg_names = vim.tbl_map(function(t)
+			return t.name
+		end, schema.get_tables(pg.url, "public"))
+		assert.is_false(vim.tbl_contains(pg_names, "Users"))
 
 		assert.is_true(schema.has_cache(mysql.url))
 		assert.is_true(schema.has_cache(pg.url))

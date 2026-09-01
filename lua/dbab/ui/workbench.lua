@@ -787,6 +787,10 @@ function Workbench:cleanup()
 		end
 	end
 
+	if self.result_buf then
+		require("dbab.ui.editable").detach(self.result_buf)
+	end
+
 	for _, buf in ipairs({ self.sidebar_buf, self.result_buf, self.history_buf }) do
 		if buf and vim.api.nvim_buf_is_valid(buf) then
 			pcall(vim.api.nvim_buf_delete, buf, { force = true })

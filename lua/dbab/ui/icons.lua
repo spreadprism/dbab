@@ -58,6 +58,10 @@ local M = {
   mut_delete     = "󰆴",
   mut_insert     = "󰐕",
   mut_create     = "󰙴",
+
+  -- editable result grid
+  editable       = "󰏫",
+  read_only      = "󰌾",
 }
 -- stylua: ignore end
 
