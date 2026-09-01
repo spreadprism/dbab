@@ -22,7 +22,7 @@ A lightweight database client for Neovim. Query databases directly from your edi
 - **Save queries**: Store frequently used queries per connection
 - **Result viewer**: Multiple display styles (table, json, vertical, markdown, raw) with type-aware highlighting
 - **Sticky header**: Column names stay pinned while you scroll through results
-- **Editable results**: edit cells in place and `:w` to generate, confirm and apply `UPDATE` statements
+- **Editable results**: edit cells in place and `:w` to generate, confirm and apply `UPDATE` and `DELETE` statements
 
 ## Layout
 
@@ -192,7 +192,7 @@ require("blink.cmp").setup({
 
 ## Editing results
 
-Results from simple single-table queries can be edited directly in the result pane. After making changes, press `:w` to confirm and apply them to the database.
+Results from simple single-table queries can be edited directly in the result pane. After making changes, press `:w` to confirm and apply `UPDATE` and `DELETE` statements to the database.
 
 ### Editability Requirements
 
@@ -220,7 +220,8 @@ The winbar shows an "editable" indicator when editing is allowed, or the reason 
 - Padding is stripped on read, so a value cannot end in a space.
 - One UPDATE is generated per edited row, with a multi-column SET.
 - The WHERE clause always uses the row's ORIGINAL key value, so editing a key column works.
-- Adding or deleting whole lines is refused — re-run the query and edit cells in place.
+- Deleting a line generates a `DELETE FROM <table> WHERE <primary key> = <original value>;` statement, subject to the same one-row guard as `UPDATE`. Deletes and edits can be combined in a single write; `DELETE` statements are listed first in the confirmation.
+- Adding a line, or replacing/emptying a line in place, is refused — re-run the query and edit cells in place.
 - If the row no longer matches exactly once (it changed or was deleted behind your back) the write is aborted and rolled back; nothing is written.
 
 ## Configuration

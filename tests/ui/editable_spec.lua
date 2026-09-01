@@ -259,24 +259,82 @@ describe("editable", function()
 			assert.is_not_nil(statements[1]:find([[SET "note" = NULL]], 1, true))
 		end)
 
-		it("refuses when a line was deleted", function()
+		it("turns a deleted line into a DELETE", function()
 			two_rows()
 			vim.api.nvim_buf_set_lines(buf, 1, 2, false, {})
 
 			local statements, err = editable.statements(buf)
 
-			assert.are.same({}, statements)
-			assert.is_not_nil(err:find("added or removed", 1, true))
+			assert.is_nil(err)
+			assert.are.equal(1, #statements)
+			assert.are.equal([[DELETE FROM "users" WHERE "id" = '1';]], statements[1])
+		end)
+
+		it("keys the DELETE off the row that was removed", function()
+			two_rows()
+			-- Remove the SECOND data row.
+			vim.api.nvim_buf_set_lines(buf, 2, 3, false, {})
+
+			local statements = editable.statements(buf)
+
+			assert.are.equal([[DELETE FROM "users" WHERE "id" = '2';]], statements[1])
+		end)
+
+		it("deletes several rows at once", function()
+			two_rows()
+			vim.api.nvim_buf_set_lines(buf, 1, 3, false, {})
+
+			local statements = editable.statements(buf)
+
+			assert.are.equal(2, #statements)
+			assert.is_not_nil(statements[1]:find([[WHERE "id" = '1']], 1, true))
+			assert.is_not_nil(statements[2]:find([[WHERE "id" = '2']], 1, true))
+		end)
+
+		it("combines a delete with an edit to another row", function()
+			two_rows()
+			retype(2, "grace", "GRACE")
+			vim.api.nvim_buf_set_lines(buf, 1, 2, false, {})
+
+			local statements = editable.statements(buf)
+
+			assert.are.equal(2, #statements)
+			-- Deletes first, then the surviving row's update.
+			assert.is_not_nil(statements[1]:find("DELETE FROM", 1, true))
+			assert.is_not_nil(statements[2]:find([[SET "name" = 'GRACE']], 1, true))
+		end)
+
+		it("ignores edits made inside a row that is then deleted", function()
+			two_rows()
+			retype(1, "ada", "ADA")
+			vim.api.nvim_buf_set_lines(buf, 1, 2, false, {})
+
+			local statements = editable.statements(buf)
+
+			assert.are.equal(1, #statements)
+			assert.is_not_nil(statements[1]:find("DELETE FROM", 1, true))
 		end)
 
 		it("refuses when a whole line was replaced", function()
+			-- The line count is unchanged but the row's anchors collapsed, so this
+			-- is neither an edit nor a deletion.
 			two_rows()
 			vim.api.nvim_buf_set_lines(buf, 1, 2, false, { " 9 | zz | q " })
 
 			local statements, err = editable.statements(buf)
 
 			assert.are.same({}, statements)
-			assert.is_not_nil(err:find("replaced rather than edited", 1, true))
+			assert.is_not_nil(err:find("emptied rather than deleted", 1, true))
+		end)
+
+		it("refuses when a line was added", function()
+			two_rows()
+			vim.api.nvim_buf_set_lines(buf, 3, 3, false, { " 9 | zz | q " })
+
+			local statements, err = editable.statements(buf)
+
+			assert.are.same({}, statements)
+			assert.is_not_nil(err:find("lines were added", 1, true))
 		end)
 
 		it("refuses a result that is not editable", function()

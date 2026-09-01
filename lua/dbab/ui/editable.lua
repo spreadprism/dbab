@@ -208,22 +208,21 @@ function M.dirty_cells(buf)
 	return changed
 end
 
---- Has the user changed the shape of the buffer rather than the contents of a
---- cell?
+--- Which rows did the user delete, and is the rest of the buffer still sane?
 ---
---- Deleting or replacing a whole line collapses that row's anchors onto a single
---- point, and adding a line leaves cells with no anchor at all. Either way the
---- geometry no longer describes the text, and generating UPDATEs from it would
---- write empty strings over the row. Refusing and asking for a re-run is the
---- honest answer.
+--- Deleting a line collapses every anchor of that row onto a single point while
+--- its neighbours keep their spans, so a removed row is identifiable without
+--- ever re-reading the text. Anything else structural -- lines added, or a row
+--- emptied in place -- stays refused, because the geometry would no longer
+--- describe the text.
 ---@param buf number
 ---@param state Dbab.EditState
+---@return number[]|nil deleted Row indices, or nil on refusal
 ---@return string|nil reason
-local function structural_edit(buf, state)
+local function analyze_structure(buf, state)
 	local expected = #state.result.rows + state.header_offset
-	if vim.api.nvim_buf_line_count(buf) ~= expected then
-		return "lines were added or removed"
-	end
+	local actual = vim.api.nvim_buf_line_count(buf)
+	local deleted = {}
 
 	for row_idx, row in ipairs(state.anchors or {}) do
 		local collapsed = 0
@@ -231,10 +230,12 @@ local function structural_edit(buf, state)
 
 		for _, id in pairs(row) do
 			total = total + 1
+
 			local mark = vim.api.nvim_buf_get_extmark_by_id(buf, NS_CELL, id, { details = true })
 			if not mark or mark[1] == nil then
-				return ("row %d lost its anchors"):format(row_idx)
+				return nil, ("row %d lost its anchors"):format(row_idx)
 			end
+
 			if mark[3] and mark[3].end_col == mark[2] then
 				collapsed = collapsed + 1
 			end
@@ -242,11 +243,23 @@ local function structural_edit(buf, state)
 
 		-- One empty cell is a legitimate edit; a whole row of them is not.
 		if total > 1 and collapsed == total then
-			return ("row %d was replaced rather than edited"):format(row_idx)
+			table.insert(deleted, row_idx)
 		end
 	end
 
-	return nil
+	if actual == expected - #deleted then
+		return deleted, nil
+	end
+
+	if actual > expected then
+		return nil, "lines were added"
+	end
+
+	if #deleted > 0 then
+		return nil, "a row was emptied rather than deleted"
+	end
+
+	return nil, "the grid was restructured"
 end
 
 --- Turn dirty cells into one UPDATE per row.
@@ -259,13 +272,23 @@ function M.statements(buf)
 		return {}, state and state.reason or "result is not editable"
 	end
 
-	local structural = structural_edit(buf, state)
-	if structural then
+	local deleted, structural = analyze_structure(buf, state)
+	if not deleted then
 		return {}, structural .. " -- re-run the query and edit cells in place"
 	end
 
-	local dirty = M.dirty_cells(buf)
-	if #dirty == 0 then
+	local is_deleted = {}
+	for _, row_idx in ipairs(deleted) do
+		is_deleted[row_idx] = true
+	end
+
+	-- A deleted row's cells all read as changed; it is going away, so the edits
+	-- inside it are moot.
+	local dirty = vim.tbl_filter(function(cell)
+		return not is_deleted[cell.row]
+	end, M.dirty_cells(buf))
+
+	if #dirty == 0 and #deleted == 0 then
 		return {}, nil
 	end
 
@@ -289,23 +312,51 @@ function M.statements(buf)
 
 	local statements = {}
 
-	for _, row_idx in ipairs(order) do
-		local sets = {}
-		for _, cell in ipairs(by_row[row_idx]) do
-			table.insert(sets, { column = state.result.columns[cell.column], value = cell.value })
-		end
-
+	---@param row_idx number
+	---@return {column: string, value: any}[]|nil, string|nil
+	local function key_predicates(row_idx)
 		local wheres = {}
+
 		for _, key in ipairs(state.keys) do
 			local idx = column_index[key:lower()]
 			if not idx then
-				return {}, ("primary key %q is not in the result"):format(key)
+				return nil, ("primary key %q is not in the result"):format(key)
 			end
 
 			-- From the ORIGINAL values, never the edited buffer: the user may have
 			-- edited the key column itself, and the row to find is the one
 			-- identified by its old value.
 			table.insert(wheres, { column = key, value = state.result.rows[row_idx][idx] })
+		end
+
+		return wheres, nil
+	end
+
+	for _, row_idx in ipairs(deleted) do
+		local wheres, err = key_predicates(row_idx)
+		if not wheres then
+			return {}, err
+		end
+
+		table.insert(
+			statements,
+			dialect.delete({
+				table_name = state.table_name,
+				schema = state.schema,
+				wheres = wheres,
+			}, state.db_type)
+		)
+	end
+
+	for _, row_idx in ipairs(order) do
+		local sets = {}
+		for _, cell in ipairs(by_row[row_idx]) do
+			table.insert(sets, { column = state.result.columns[cell.column], value = cell.value })
+		end
+
+		local wheres, err = key_predicates(row_idx)
+		if not wheres then
+			return {}, err
 		end
 
 		table.insert(

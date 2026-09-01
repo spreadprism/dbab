@@ -92,6 +92,27 @@ function M.update(spec, db_type)
 	)
 end
 
+---@class Dbab.DeleteSpec
+---@field table_name string
+---@field schema string|nil
+---@field wheres {column: string, value: any}[]
+
+--- One DELETE per removed row.
+---@param spec Dbab.DeleteSpec
+---@param db_type string
+---@return string
+function M.delete(spec, db_type)
+	local wheres = {}
+	for _, where in ipairs(spec.wheres) do
+		table.insert(wheres, ("%s = %s"):format(M.identifier(where.column, db_type), M.literal(where.value, db_type)))
+	end
+
+	return ("DELETE FROM %s WHERE %s;"):format(
+		M.table_ref(spec.table_name, spec.schema, db_type),
+		table.concat(wheres, " AND ")
+	)
+end
+
 --- Wrap statements so they cannot commit unless each touches exactly one row.
 ---
 --- If each statement were its own subprocess a transaction could not span calls

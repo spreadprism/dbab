@@ -253,6 +253,40 @@ describe("editable grid", function()
 				assert.are.equal(before, #history.get_all())
 			end)
 
+			it("deletes a row when its line is removed", function()
+				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
+
+				-- Remove the first data row's line.
+				vim.api.nvim_buf_set_lines(wb.result_buf, 1, 2, false, {})
+
+				local statements, err = editable.statements(wb.result_buf)
+
+				assert.is_nil(err)
+				assert.are.equal(1, #statements)
+				assert.is_not_nil(statements[1]:find("DELETE FROM", 1, true))
+
+				local ok, apply_err = editable.apply(wb.result_buf, statements)
+
+				assert(ok, tostring(apply_err))
+
+				local after = table_state()
+				assert.is_nil(after:find("ada", 1, true))
+				assert.is_not_nil(after:find("grace", 1, true))
+			end)
+
+			it("refuses a delete whose row already vanished", function()
+				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
+				vim.api.nvim_buf_set_lines(wb.result_buf, 1, 2, false, {})
+
+				local statements = editable.statements(wb.result_buf)
+				executor.execute(target.url, "DELETE FROM dbab_edit WHERE id = 1;")
+
+				local ok, err = editable.apply(wb.result_buf, statements)
+
+				assert.is_false(ok)
+				assert.is_not_nil(err:find("not matched exactly once", 1, true))
+			end)
+
 			it("leaves other rows alone", function()
 				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
 				retype(1, "ada", "ADA")
