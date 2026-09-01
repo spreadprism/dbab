@@ -16,36 +16,70 @@ function M.setup(opts)
 	end
 end
 
---- Open the Workbench UI
-function M.open()
-	M.ui.workbench.open()
-end
+--- Open a workbench, asking which connection when not told.
+---
+--- Each connection gets its own tabpage; naming one that is already open
+--- focuses that tabpage rather than building a second.
+---@param name? string connection name
+function M.open(name)
+	if name ~= nil then
+		M.ui.workbench.open_for(name)
+		return
+	end
 
---- Open connection picker
-function M.pick_connection()
-	M.ui.picker.open(function(selected)
-		if selected then
-			M.core.connection.set_active(selected.name)
-			vim.notify("[dbab] Connected to: " .. selected.name, vim.log.levels.INFO)
+	local names = vim.tbl_map(function(conn)
+		return conn.name
+	end, M.core.connection.list_connections())
+	table.sort(names)
+
+	if #names == 0 then
+		vim.notify("[dbab] No connections configured", vim.log.levels.WARN)
+		return
+	end
+
+	-- The only connection needs no choosing: asking the user to confirm their
+	-- one option is ceremony, and one database is the common case.
+	if #names == 1 then
+		M.ui.workbench.open_for(names[1])
+		return
+	end
+
+	-- `vim.ui.select` is asynchronous and cancellable, so everything past the
+	-- choice happens in the callback. It opens by *name*, so it stays correct
+	-- even if the user moves tabs while the prompt is up.
+	vim.ui.select(names, { prompt = "dbab: open connection" }, function(choice)
+		if choice == nil then
+			return
 		end
+
+		M.ui.workbench.open_for(choice)
 	end)
 end
 
---- Execute a query using active connection
+--- Execute a query against the current workbench's connection
 ---@param query string
 ---@return string
 function M.execute(query)
-	return M.core.executor.execute_active(query)
+	local wb = M.ui.workbench.current()
+	if not wb then
+		vim.notify("[dbab] Not in a dbab workbench. Open one with :Dbab first.", vim.log.levels.WARN)
+		return ""
+	end
+
+	return M.core.executor.execute(wb.url, query)
 end
 
---- Set active connection by name
+--- Deprecated: connections are now opened, not switched to.
 ---@param name string
 function M.connect(name)
-	if M.core.connection.set_active(name) then
-		vim.notify("[dbab] Connected to: " .. name, vim.log.levels.INFO)
-	else
-		vim.notify("[dbab] Connection not found: " .. name, vim.log.levels.ERROR)
-	end
+	vim.notify("[dbab] `connect` is deprecated, use `:Dbab " .. tostring(name) .. "`", vim.log.levels.WARN)
+	M.open(name)
+end
+
+--- Deprecated alias for `open()`.
+function M.pick_connection()
+	vim.notify("[dbab] `pick_connection` is deprecated, use `:Dbab`", vim.log.levels.WARN)
+	M.open()
 end
 
 --- List available connections
@@ -58,15 +92,16 @@ function M.list_connections()
 
 	local lines = { "Available connections:" }
 	for i, conn in ipairs(connections) do
-		local active = conn.name == M.core.connection.get_active_name() and " (active)" or ""
-		table.insert(lines, string.format("  %d. %s%s", i, conn.name, active))
+		local open = M.ui.workbench.get(conn.name) and " (open)" or ""
+		table.insert(lines, string.format("  %d. %s%s", i, conn.name, open))
 	end
 	vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
---- Close the workbench
-function M.close()
-	M.ui.workbench.close()
+--- Close a workbench
+---@param name? string connection name; defaults to the current workbench
+function M.close(name)
+	M.ui.workbench.close(name)
 end
 
 --- Restore the workbench layout

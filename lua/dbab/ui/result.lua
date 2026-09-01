@@ -11,23 +11,31 @@ function M.setup(workbench_ref)
 	workbench = workbench_ref
 end
 
----@type Dbab.QueryResult|nil
-M.last_result = nil
+-- Result state lives on the workbench instance so two workbenches keep their
+-- own last result; these names are proxied for the modules that read them.
+local RESULT_FIELDS = {
+	last_result = true,
+	last_query = true,
+	last_duration = true,
+	last_conn_name = true,
+	last_timestamp = true,
+	last_result_width = true,
+}
 
----@type string|nil
-M.last_query = nil
-
----@type number|nil
-M.last_duration = nil
-
----@type string|nil
-M.last_conn_name = nil
-
----@type number|nil
-M.last_timestamp = nil
-
----@type number|nil
-M.last_result_width = nil
+setmetatable(M, {
+	__index = function(_, k)
+		if RESULT_FIELDS[k] then
+			return workbench._state().result[k]
+		end
+	end,
+	__newindex = function(t, k, v)
+		if RESULT_FIELDS[k] then
+			workbench._state().result[k] = v
+			return
+		end
+		rawset(t, k, v)
+	end,
+})
 
 ---@param result Dbab.QueryResult
 ---@param widths number[]
@@ -129,7 +137,7 @@ end
 ---@return string|nil
 local function active_db_type()
 	local connection = require("dbab.core.connection")
-	local url = connection.get_active_url()
+	local _, url = workbench.get_active_connection_context()
 	if not url then
 		return nil
 	end
@@ -278,7 +286,7 @@ function M.show_result(raw, elapsed)
 
 	-- Cleared up front: every branch below that is not a table grid has no
 	-- header line for the float to stand in for.
-	sticky.set_header(nil)
+	sticky.set_header(workbench._state(), nil)
 
 	if is_error_result(raw) then
 		local lines, highlights = format_error(raw)
@@ -294,7 +302,13 @@ function M.show_result(raw, elapsed)
 		local ns = vim.api.nvim_create_namespace("dbab_result")
 		vim.api.nvim_buf_clear_namespace(workbench.result_buf, ns, 0, -1)
 		for _, hl in ipairs(highlights) do
-			vim.api.nvim_buf_set_extmark(workbench.result_buf, ns, hl.line, hl.col_start, { end_col = hl.col_end, hl_group = hl.hl })
+			vim.api.nvim_buf_set_extmark(
+				workbench.result_buf,
+				ns,
+				hl.line,
+				hl.col_start,
+				{ end_col = hl.col_end, hl_group = hl.hl }
+			)
 		end
 
 		vim.notify("[dbab] Query error", vim.log.levels.ERROR)
@@ -316,7 +330,13 @@ function M.show_result(raw, elapsed)
 		local ns = vim.api.nvim_create_namespace("dbab_result")
 		vim.api.nvim_buf_clear_namespace(workbench.result_buf, ns, 0, -1)
 		for _, hl in ipairs(highlights) do
-			vim.api.nvim_buf_set_extmark(workbench.result_buf, ns, hl.line, hl.col_start, { end_col = hl.col_end, hl_group = hl.hl })
+			vim.api.nvim_buf_set_extmark(
+				workbench.result_buf,
+				ns,
+				hl.line,
+				hl.col_start,
+				{ end_col = hl.col_end, hl_group = hl.hl }
+			)
 		end
 
 		M.last_result = { columns = {}, rows = {}, row_count = count or 0, raw = raw }
@@ -392,7 +412,13 @@ function M.show_result(raw, elapsed)
 						{ end_col = col_start - 1 + #col_name, hl_group = "DbabKey" }
 					)
 
-					vim.api.nvim_buf_set_extmark(workbench.result_buf, ns, ln, sep - 1, { end_col = sep + 2, hl_group = "DbabBorder" })
+					vim.api.nvim_buf_set_extmark(
+						workbench.result_buf,
+						ns,
+						ln,
+						sep - 1,
+						{ end_col = sep + 2, hl_group = "DbabBorder" }
+					)
 
 					local value = vim.trim(line:sub(sep + 3))
 					local value_start = sep + 2
@@ -439,7 +465,7 @@ function M.show_result(raw, elapsed)
 	apply_highlights(workbench.result_buf, result, widths, has_header)
 
 	-- A new result changes the header text, and the float is not otherwise told.
-	sticky.set_header(has_header and lines[1] or nil)
+	sticky.set_header(workbench._state(), has_header and lines[1] or nil)
 
 	require("dbab.ui.winbar").refresh_result()
 
@@ -456,7 +482,7 @@ function M.show_result(raw, elapsed)
 			vim.cmd("stopinsert")
 		end
 
-		sticky.follow(workbench.result_win)
+		sticky.follow(workbench._state(), workbench.result_win)
 	end
 end
 
@@ -503,16 +529,6 @@ function M.yank_all_rows()
 	vim.fn.setreg("+", json)
 	vim.fn.setreg('"', json)
 	vim.notify("[dbab] All rows copied as JSON", vim.log.levels.INFO)
-end
-
-function M.cleanup()
-	sticky.cleanup()
-	M.last_result = nil
-	M.last_query = nil
-	M.last_duration = nil
-	M.last_conn_name = nil
-	M.last_timestamp = nil
-	M.last_result_width = nil
 end
 
 return M

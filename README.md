@@ -13,6 +13,7 @@ A lightweight database client for Neovim. Query databases directly from your edi
 ## Features
 
 - **Multi-database support**: PostgreSQL, MySQL, MariaDB, SQLite
+- **One tab per connection**: each connection gets its own Neovim tabpage, with its own editor, results and history
 - **Flexible layout**: Choose from presets or define your own pane arrangement
 - **Schema browser**: Navigate schemas, tables, and columns in sidebar
 - **Query editor**: Write and execute SQL with syntax highlighting
@@ -123,14 +124,18 @@ require("blink.cmp").setup({
 
 | Command | Description |
 |---------|-------------|
-| `:Dbab` | Open dbab sidebar |
-| `:DbabClose` | Close dbab |
+| `:Dbab` | Pick a connection and open its workbench |
+| `:Dbab <name>` | Open (or focus) the workbench for `<name>` |
+| `:Dbab list` | List connections, marking the open ones |
+| `:Dbab query <sql>` | Run SQL against the current workbench's connection |
+| `:DbabClose [name]` | Close the named workbench, or the current one |
+| `:DbabRestore` | Rebuild the current workbench's layout |
 
 ### Sidebar Keymaps
 
 | Key | Action |
 |-----|--------|
-| `<CR>` / `o` | Toggle node / Open query |
+| `<CR>` / `o` | Toggle node / Open query (within the pinned connection) |
 | `<Tab>` | Move to editor |
 | `S` | Select table (SELECT *) |
 | `i` | Insert table (INSERT template) |

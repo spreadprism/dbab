@@ -7,28 +7,55 @@ local icons = require("dbab.ui.icons")
 
 local M = {}
 
----@type boolean
-M.is_loading = false
-
----@type string|nil
-M.loading_conn_name = nil
-
+--- Deliberately module-global, not per workbench: copying a saved query in one
+--- workbench and pasting it into another is the point of having a clipboard.
 ---@type {name: string, conn_name: string, content: string}|nil
 M.clipboard = nil
 
----@type number|nil
-M.buf = nil
-
----@type number|nil
-M.win = nil
-
 --- See lua/dbab/types.lua for type definitions (Dbab.SidebarNode)
+---
+--- The rest of the sidebar's state is per workbench and proxied onto the
+--- instance, so each connection's tree expands independently.
+local SIDEBAR_FIELDS = {
+	nodes = true,
+	expanded = true,
+	is_loading = true,
+	loading_conn_name = true,
+	loaded = true,
+}
 
----@type Dbab.SidebarNode[]
-M.nodes = {}
+local function wb()
+	return require("dbab.ui.workbench")._state()
+end
 
----@type table<string, boolean>
-M.expanded = {}
+setmetatable(M, {
+	__index = function(_, k)
+		if SIDEBAR_FIELDS[k] then
+			return wb().sidebar[k]
+		end
+		if k == "buf" then
+			return wb().sidebar_buf
+		end
+		if k == "win" then
+			return wb().sidebar_win
+		end
+	end,
+	__newindex = function(t, k, v)
+		if SIDEBAR_FIELDS[k] then
+			wb().sidebar[k] = v
+			return
+		end
+		if k == "buf" then
+			wb().sidebar_buf = v
+			return
+		end
+		if k == "win" then
+			wb().sidebar_win = v
+			return
+		end
+		rawset(t, k, v)
+	end,
+})
 
 local db_hl_map = {
 	postgres = "DbabIconPostgres",
@@ -63,7 +90,17 @@ local function render_tree()
 	local lines = {}
 	local sidebar_width = 30
 
+	-- A workbench is pinned to one connection, so its explorer shows that tree
+	-- and nothing else.
 	local connections = connection.list_connections()
+	local pinned = wb().conn_name
+
+	if pinned and pinned ~= "" then
+		connections = vim.tbl_filter(function(conn)
+			return conn.name == pinned
+		end, connections)
+	end
+
 	if #connections == 0 then
 		table.insert(lines, "No connections configured")
 		table.insert(lines, "Press 'a' to add connection")
@@ -74,7 +111,7 @@ local function render_tree()
 	M.nodes = {}
 
 	for _, conn in ipairs(connections) do
-		local is_active = conn.name == connection.get_active_name()
+		local is_active = conn.name == pinned
 		local is_expanded = M.expanded[conn.name]
 
 		local sidebar_cfg = config.get().sidebar
@@ -86,7 +123,7 @@ local function render_tree()
 		local conn_status
 		if M.is_loading and conn.name == M.loading_conn_name then
 			conn_status = icons.loading .. " loading"
-		elseif is_active or connection.is_connected(conn.name) then
+		elseif is_active then
 			conn_status = icons.connected .. " connected"
 		else
 			conn_status = icons.idle .. " idle"
@@ -538,10 +575,10 @@ function M.toggle_node()
 
 	if node.type == "connection" then
 		M.expanded[node.name] = not M.expanded[node.name]
-		if M.expanded[node.name] and node.name ~= connection.get_active_name() then
+		if M.expanded[node.name] and not M.loaded then
 			M.is_loading = true
 			M.loading_conn_name = node.name
-			connection.set_active(node.name)
+			M.loaded = true
 			for _, tab in ipairs(workbench.query_tabs) do
 				if tab.conn_name == "no connection" then
 					tab.conn_name = node.name
@@ -549,26 +586,51 @@ function M.toggle_node()
 			end
 			M.refresh()
 
-			local url = connection.get_active_url()
+			-- Captured now, not resolved inside the callbacks: the user can
+			-- switch tabpages (or open another workbench) while the schema load
+			-- is in flight, and this work belongs to the workbench that started
+			-- it. Resolving later would write one workbench's tree into another.
+			local this = wb()
+			local url = this.url
+
+			---@param loading boolean
+			local function set_loading(loading)
+				this.sidebar.is_loading = loading
+				this.sidebar.loading_conn_name = loading and node.name or nil
+			end
+
+			local function expand_defaults()
+				this.sidebar.expanded[node.name] = true
+				this.sidebar.expanded[node.name .. ".buffers"] = true
+				this.sidebar.expanded[node.name .. ".tables"] = true
+			end
+
+			--- Only repaint if this workbench is still the one on screen.
+			local function refresh_if_visible()
+				if workbench.current() == this then
+					M.refresh()
+					workbench.refresh_history()
+				end
+			end
+
 			if url then
 				schema.get_schemas_async(url, function(schemas, err)
+					if this.closed then
+						return
+					end
+
 					if err then
 						vim.notify("[dbab] Schema load error: " .. err, vim.log.levels.ERROR)
-						M.is_loading = false
-						M.loading_conn_name = nil
-						M.refresh()
+						set_loading(false)
+						refresh_if_visible()
 						return
 					end
 
 					local pending = #schemas
 					if pending == 0 then
-						M.is_loading = false
-						M.loading_conn_name = nil
-						M.expanded[node.name] = true
-						M.expanded[node.name .. ".buffers"] = true
-						M.expanded[node.name .. ".tables"] = true
-						M.refresh()
-						workbench.refresh_history()
+						set_loading(false)
+						expand_defaults()
+						refresh_if_visible()
 						vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
 						return
 					end
@@ -577,18 +639,19 @@ function M.toggle_node()
 
 					for _, sch in ipairs(schemas) do
 						schema.get_tables_async(url, sch.name, function(_, table_err)
+							if this.closed then
+								return
+							end
+
 							if table_err then
 								table.insert(failures, sch.name)
 							end
+
 							pending = pending - 1
 							if pending <= 0 then
-								M.is_loading = false
-								M.loading_conn_name = nil
-								M.expanded[node.name] = true
-								M.expanded[node.name .. ".buffers"] = true
-								M.expanded[node.name .. ".tables"] = true
-								M.refresh()
-								workbench.refresh_history()
+								set_loading(false)
+								expand_defaults()
+								refresh_if_visible()
 
 								if #failures > 0 then
 									vim.notify(
@@ -668,20 +731,13 @@ end
 
 ---@param conn_name string
 function M.open_new_query(conn_name)
-	if conn_name ~= connection.get_active_name() then
-		connection.set_active(conn_name)
-	end
-
+	local _ = conn_name
 	workbench.open_editor()
 end
 
 ---@param conn_name string
 ---@param query_name string
 function M.open_saved_query(conn_name, query_name)
-	if conn_name ~= connection.get_active_name() then
-		connection.set_active(conn_name)
-	end
-
 	local content, err = storage.load_query(conn_name, query_name)
 	if not content then
 		vim.notify("[dbab] Failed to load query: " .. (err or "unknown error"), vim.log.levels.ERROR)
@@ -740,7 +796,8 @@ function M.setup(buf, win)
 	vim.api.nvim_buf_set_option(buf, "buflisted", false)
 	vim.api.nvim_buf_set_option(buf, "modifiable", false)
 	vim.api.nvim_buf_set_option(buf, "swapfile", false)
-	vim.api.nvim_buf_set_name(buf, "[dbab] Explorer")
+	-- Buffer names must be unique: every open workbench has an explorer.
+	pcall(vim.api.nvim_buf_set_name, buf, "[dbab] Explorer - " .. wb().conn_name)
 
 	vim.api.nvim_win_set_option(win, "number", false)
 	vim.api.nvim_win_set_option(win, "relativenumber", false)
@@ -811,7 +868,7 @@ function M.setup_keymaps()
 	end)
 
 	map(keymaps.new_query, function()
-		local conn_name = connection.get_active_name()
+		local conn_name = wb().conn_name
 		if conn_name then
 			M.open_new_query(conn_name)
 		else
@@ -889,7 +946,7 @@ function M.setup_keymaps()
 			vim.notify("[dbab] Nothing to paste", vim.log.levels.WARN)
 			return
 		end
-		local conn_name = connection.get_active_name()
+		local conn_name = wb().conn_name
 		if not conn_name then
 			vim.notify("[dbab] No active connection", vim.log.levels.WARN)
 			return
@@ -936,14 +993,6 @@ function M.setup_keymaps()
 	map("?", function()
 		require("dbab.ui.help").show_sidebar()
 	end)
-end
-
-function M.cleanup()
-	M.buf = nil
-	M.win = nil
-	M.nodes = {}
-	M.is_loading = false
-	M.loading_conn_name = nil
 end
 
 return M

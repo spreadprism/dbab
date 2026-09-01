@@ -56,7 +56,7 @@ function M.show(raw, elapsed)
 	end
 
 	local connection = require("dbab.core.connection")
-	local active_url = connection.get_active_url()
+	local _, active_url = require("dbab.ui.workbench").get_active_connection_context()
 	local result = parser.parse(raw, nil, active_url and connection.parse_type(active_url) or nil)
 	M.current_result = result
 	M.cursor_row = 1

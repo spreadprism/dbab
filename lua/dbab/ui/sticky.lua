@@ -15,14 +15,13 @@ local ZINDEX = 20
 
 local AUGROUP = "DbabSticky"
 
----@type number|nil
-M.buf = nil
-
----@type number|nil
-M.win = nil
-
----@type string|nil Header line currently mirrored by the float
-M.header = nil
+--- Per-workbench float state lives on the instance, so two workbenches do not
+--- fight over one float. `wb` is always passed explicitly.
+---@param wb table
+---@return table
+local function st(wb)
+	return wb.sticky
+end
 
 ---@return boolean
 local function enabled()
@@ -39,9 +38,11 @@ end
 
 --- Scratch buffer backing the float, created lazily.
 ---@return number
-function M.buffer()
-	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
-		return M.buf
+---@param wb table
+function M.buffer(wb)
+	local s = st(wb)
+	if s.buf and vim.api.nvim_buf_is_valid(s.buf) then
+		return s.buf
 	end
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -50,44 +51,49 @@ function M.buffer()
 	vim.bo[buf].swapfile = false
 	-- Nothing here is ever undone: it is rewritten on every scroll event.
 	vim.bo[buf].undolevels = -1
-	M.buf = buf
+	s.buf = buf
 
 	return buf
 end
 
 --- Set the header line the float should mirror. `nil` disables the float.
+---@param wb table
 ---@param header string|nil
-function M.set_header(header)
-	M.header = header
+function M.set_header(wb, header)
+	st(wb).header = header
 	if header == nil then
-		M.hide()
+		M.hide(wb)
 	end
 end
 
-function M.hide()
-	if win_valid(M.win) then
-		pcall(vim.api.nvim_win_close, M.win, true)
+---@param wb table
+function M.hide(wb)
+	local s = st(wb)
+	if win_valid(s.win) then
+		pcall(vim.api.nvim_win_close, s.win, true)
 	end
-	M.win = nil
+	s.win = nil
 end
 
 --- Show / move / hide the float to match the current scroll position of `win`.
+---@param wb table
 ---@param win number|nil Result window
-function M.follow(win)
-	if not enabled() or M.header == nil or not win_valid(win) then
-		M.hide()
+function M.follow(wb, win)
+	local s = st(wb)
+	if not enabled() or s.header == nil or not win_valid(win) then
+		M.hide(wb)
 		return
 	end
 
 	-- `w0` is the first line the window shows. Line 1 is the header itself, so
 	-- only past it is there anything to stand in for.
 	if vim.fn.line("w0", win) <= 1 then
-		M.hide()
+		M.hide(wb)
 		return
 	end
 
-	local buf = M.buffer()
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { M.header })
+	local buf = M.buffer(wb)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { s.header })
 
 	-- `textoff` is the width of the number column, signs and folds, so the float
 	-- starts where the buffer text starts instead of over the line numbers.
@@ -104,9 +110,9 @@ function M.follow(win)
 		height = 1,
 	}
 
-	if win_valid(M.win) then
+	if win_valid(s.win) then
 		-- Moved rather than reopened, so scrolling does not flicker.
-		pcall(vim.api.nvim_win_set_config, M.win, geometry)
+		pcall(vim.api.nvim_win_set_config, s.win, geometry)
 	else
 		local ok, float = pcall(
 			vim.api.nvim_open_win,
@@ -126,7 +132,7 @@ function M.follow(win)
 			return
 		end
 
-		M.win = float
+		s.win = float
 		vim.wo[float].wrap = false
 		vim.wo[float].foldenable = false
 		vim.wo[float].cursorline = false
@@ -138,16 +144,17 @@ function M.follow(win)
 	-- moment the grid is wider than the pane. `winsaveview` reports the *current*
 	-- window, so it must be taken inside `nvim_win_call` on the source window.
 	local view = vim.api.nvim_win_call(win, vim.fn.winsaveview)
-	pcall(vim.api.nvim_win_call, M.win, function()
+	pcall(vim.api.nvim_win_call, s.win, function()
 		vim.fn.winrestview({ leftcol = view.leftcol })
 	end)
 end
 
 --- Keep the cursor off the header line: `gg`, a click, or `k` from row 1 should
 --- all settle on data.
+---@param wb table
 ---@param win number|nil Result window
-function M.skip_header(win)
-	if M.header == nil or not win_valid(win) then
+function M.skip_header(wb, win)
+	if st(wb).header == nil or not win_valid(win) then
 		return
 	end
 
@@ -171,14 +178,15 @@ function M.skip_header(win)
 end
 
 --- Attach the autocommands that drive the float to the result buffer.
+---@param wb table Owning workbench
 ---@param buf number Result buffer
 ---@param get_win fun():number|nil Resolver for the current result window
-function M.attach(buf, get_win)
+function M.attach(wb, buf, get_win)
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
 
-	local group = vim.api.nvim_create_augroup(AUGROUP, { clear = true })
+	local group = vim.api.nvim_create_augroup(("%s%d"):format(AUGROUP, wb.id), { clear = true })
 
 	-- WinScrolled covers horizontal scrolling too, which the leftcol sync needs.
 	-- WinResized handles the pane being resized under the float, and BufWinEnter
@@ -187,7 +195,7 @@ function M.attach(buf, get_win)
 		group = group,
 		buffer = buf,
 		callback = function()
-			M.follow(get_win())
+			M.follow(wb, get_win())
 		end,
 	})
 
@@ -195,24 +203,26 @@ function M.attach(buf, get_win)
 		group = group,
 		buffer = buf,
 		callback = function()
-			M.skip_header(get_win())
-			M.follow(get_win())
+			M.skip_header(wb, get_win())
+			M.follow(wb, get_win())
 		end,
 	})
 end
 
 --- The float is anchored to a window: leaving it behind orphans a one-line
 --- window over whatever replaces the pane.
-function M.cleanup()
-	M.hide()
-	pcall(vim.api.nvim_create_augroup, AUGROUP, { clear = true })
+---@param wb table
+function M.cleanup(wb)
+	local s = st(wb)
+	M.hide(wb)
+	pcall(vim.api.nvim_del_augroup_by_name, ("%s%d"):format(AUGROUP, wb.id))
 
-	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
-		pcall(vim.api.nvim_buf_delete, M.buf, { force = true })
+	if s.buf and vim.api.nvim_buf_is_valid(s.buf) then
+		pcall(vim.api.nvim_buf_delete, s.buf, { force = true })
 	end
 
-	M.buf = nil
-	M.header = nil
+	s.buf = nil
+	s.header = nil
 end
 
 return M

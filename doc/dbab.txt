@@ -285,12 +285,31 @@ Custom layout example: >lua
 ==============================================================================
 COMMANDS                                                        *dbab-commands*
 
-                                                                        *:Dbab*
-:Dbab                   Open the dbab sidebar. If already open, switches to
-                        the dbab tab.
+Each connection opens in its own Neovim tabpage. Running the command again for
+an already-open connection focuses its tabpage rather than creating a second
+one.
 
-                                                                   *:DbabClose*
-:DbabClose              Close dbab and clean up all windows.
+                                                                         *:Dbab*
+:Dbab                   Pick a connection and open its workbench (or prompt
+                        via vim.ui.select over configured connections).
+
+                                                                    *:Dbab <name>*
+:Dbab <name>            Open (or focus) the workbench for connection <name>.
+
+                                                                  *:Dbab list*
+:Dbab list              List all connections, marking the ones that are
+                        currently open.
+
+                                                                  *:Dbab query*
+:Dbab query <sql>       Run SQL query against the current workbench's
+                        connection. Errors if not inside a workbench.
+
+                                                                    *:DbabClose*
+:DbabClose [name]       Close the named workbench, or close the current one
+                        if no name is provided.
+
+                                                                  *:DbabRestore*
+:DbabRestore            Rebuild the current workbench's layout.
 
 ==============================================================================
 KEYMAPS                                                          *dbab-keymaps*

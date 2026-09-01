@@ -17,11 +17,23 @@ function M.setup(workbench_ref)
 	workbench = workbench_ref
 end
 
----@type string[]
-M.history = {}
+-- Proxied onto the workbench instance (see ui/workbench.lua).
+local QUERY_FIELDS = { history = true, history_index = true }
 
----@type number
-M.history_index = 0
+setmetatable(M, {
+	__index = function(_, k)
+		if QUERY_FIELDS[k] then
+			return workbench._state().query[k]
+		end
+	end,
+	__newindex = function(t, k, v)
+		if QUERY_FIELDS[k] then
+			workbench._state().query[k] = v
+			return
+		end
+		rawset(t, k, v)
+	end,
+})
 
 ---@param buf number
 ---@param callback? fun(success: boolean)
@@ -40,7 +52,7 @@ function M.save_query_by_buf(buf, callback)
 		return
 	end
 
-	local conn_name = tab.conn_name or connection.get_active_name()
+	local conn_name = tab.conn_name or workbench.get_active_connection_context()
 	if not conn_name then
 		vim.notify("[dbab] No connection for query", vim.log.levels.WARN)
 		if callback then
@@ -172,7 +184,9 @@ function M.execute_query(opts)
 		return
 	end
 
-	local url = connection.get_active_url()
+	-- The tab's own connection, not the session-global one: otherwise a tab
+	-- pinned to one database completes against it but executes against another.
+	local conn_name, url = workbench.get_active_connection_context()
 	if not url then
 		vim.notify("[dbab] No active connection", vim.log.levels.WARN)
 		return
@@ -192,7 +206,7 @@ function M.execute_query(opts)
 	query_history.add({
 		query = query,
 		timestamp = os.time(),
-		conn_name = connection.get_active_name() or "unknown",
+		conn_name = conn_name or "unknown",
 		duration_ms = elapsed,
 		row_count = parsed_result and parsed_result.row_count or 0,
 	})
@@ -204,7 +218,7 @@ function M.execute_query(opts)
 	local result_mod = require("dbab.ui.result")
 	result_mod.last_query = query
 	result_mod.last_duration = elapsed
-	result_mod.last_conn_name = connection.get_active_name()
+	result_mod.last_conn_name = conn_name
 	result_mod.last_timestamp = os.time()
 	result_mod.show_result(result, elapsed)
 end
@@ -222,10 +236,5 @@ local function delete_existing_buf(name)
 end
 
 M.delete_existing_buf = delete_existing_buf
-
-function M.cleanup()
-	M.history = {}
-	M.history_index = 0
-end
 
 return M

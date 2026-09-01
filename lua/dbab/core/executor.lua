@@ -323,17 +323,6 @@ function M.execute(url, query)
 	return result or ""
 end
 
----@param query string SQL query
----@return string result
-function M.execute_active(query)
-	local url = connection.get_active_url()
-	if not url then
-		vim.notify("[dbab] No active connection. Use :Dbab connect first.", vim.log.levels.WARN)
-		return ""
-	end
-	return M.execute(url, query)
-end
-
 ---@param url string
 ---@param query string
 ---@param callback fun(result: string, err: string|nil)
@@ -343,19 +332,6 @@ function M.execute_async(url, query, callback)
 	else
 		cli_execute_async(url, query, callback)
 	end
-end
-
----@param query string SQL query
----@param callback fun(result: string, err: string|nil)
-function M.execute_active_async(query, callback)
-	local url = connection.get_active_url()
-	if not url then
-		vim.schedule(function()
-			callback("", "No active connection")
-		end)
-		return
-	end
-	M.execute_async(url, query, callback)
 end
 
 return M

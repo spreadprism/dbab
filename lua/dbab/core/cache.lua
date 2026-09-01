@@ -15,7 +15,7 @@ end
 ---@param url? string
 ---@return string[]
 function M.get_table_names_cached(url)
-	local target_url = url or connection.get_active_url()
+	local target_url = url
 	if not target_url then
 		return {}
 	end
@@ -26,7 +26,7 @@ end
 ---@param url? string
 ---@return Dbab.Column[]
 function M.get_all_columns_cached(url)
-	local target_url = url or connection.get_active_url()
+	local target_url = url
 	if not target_url then
 		return {}
 	end
@@ -41,7 +41,7 @@ function M.warmup(callback, url)
 		return
 	end
 
-	local target_url = url or connection.get_active_url()
+	local target_url = url
 	if not target_url then
 		return
 	end

@@ -16,17 +16,51 @@ local function get_current_connection_name()
 			return conn_name
 		end
 	end
-	return connection.get_active_name()
+	return wb().conn_name
 end
 
----@type number|nil
-M.buf = nil
+--- Buffer/window come from the owning workbench instance.
+local function wb()
+	return require("dbab.ui.workbench")._state()
+end
 
----@type number|nil
-M.win = nil
-
----@type table[] entry_line_map: {{start=N, finish=N}, ...} (1-indexed line numbers)
-M.entry_line_map = {}
+-- entry_line_map ({{start=N, finish=N}, ...}, 1-indexed) maps buffer lines to
+-- history entries. It is per workbench: two open workbenches render different
+-- numbers of entries, and a shared map would resolve the cursor to the wrong
+-- one.
+setmetatable(M, {
+	__index = function(_, k)
+		if k == "buf" then
+			return wb().history_buf
+		end
+		if k == "win" then
+			return wb().history_win
+		end
+		if k == "entry_line_map" then
+			local w = wb()
+			w.history_ui = w.history_ui or {}
+			w.history_ui.entry_line_map = w.history_ui.entry_line_map or {}
+			return w.history_ui.entry_line_map
+		end
+	end,
+	__newindex = function(t, k, v)
+		if k == "buf" then
+			wb().history_buf = v
+			return
+		end
+		if k == "win" then
+			wb().history_win = v
+			return
+		end
+		if k == "entry_line_map" then
+			local w = wb()
+			w.history_ui = w.history_ui or {}
+			w.history_ui.entry_line_map = v
+			return
+		end
+		rawset(t, k, v)
+	end,
+})
 
 --- Apply treesitter SQL syntax highlighting to a portion of a line
 ---@param buf number Buffer number
@@ -153,7 +187,7 @@ function M.get_or_create_buf()
 	vim.api.nvim_buf_set_option(M.buf, "bufhidden", "hide")
 	vim.api.nvim_buf_set_option(M.buf, "swapfile", false)
 	vim.api.nvim_buf_set_option(M.buf, "modifiable", false)
-	vim.api.nvim_buf_set_name(M.buf, "[dbab-history]")
+	pcall(vim.api.nvim_buf_set_name, M.buf, "[dbab-history] " .. wb().conn_name)
 
 	return M.buf
 end
@@ -1020,13 +1054,5 @@ function M.setup(win)
 end
 
 --- Cleanup
-function M.cleanup()
-	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
-		pcall(vim.api.nvim_buf_delete, M.buf, { force = true })
-	end
-	M.buf = nil
-	M.win = nil
-	M.entry_line_map = {}
-end
 
 return M

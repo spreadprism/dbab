@@ -15,7 +15,7 @@ local function get_context_url()
 			return tab_url
 		end
 	end
-	return connection.get_active_url()
+	return nil
 end
 
 source.new = function()

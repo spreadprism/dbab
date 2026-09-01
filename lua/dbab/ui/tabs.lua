@@ -14,11 +14,24 @@ function M.setup(workbench_ref)
 	workbench = workbench_ref
 end
 
----@type Dbab.QueryTab[]
-M.query_tabs = {}
+-- Query tabs belong to the workbench instance, so each connection's tabpage
+-- keeps its own set. Proxied under the old names for existing readers.
+local TAB_FIELDS = { query_tabs = true, active_tab = true }
 
----@type number
-M.active_tab = 0
+setmetatable(M, {
+	__index = function(_, k)
+		if TAB_FIELDS[k] then
+			return workbench._state().tabs[k]
+		end
+	end,
+	__newindex = function(t, k, v)
+		if TAB_FIELDS[k] then
+			workbench._state().tabs[k] = v
+			return
+		end
+		rawset(t, k, v)
+	end,
+})
 
 local TAB_TOTAL_WIDTH = 16
 local ICON_WIDTH = 2
@@ -122,7 +135,7 @@ function M.switch_tab(index)
 		workbench.editor_buf = tab.buf
 	end
 
-	local conn_name = tab.conn_name or connection.get_active_name() or "no connection"
+	local conn_name = tab.conn_name or workbench.conn_name or "no connection"
 	local display_name = tab.is_saved and tab.name or ("*" .. tab.name)
 	pcall(vim.api.nvim_buf_set_name, tab.buf, "[dbab] " .. display_name .. " - " .. conn_name)
 
@@ -195,7 +208,7 @@ end
 ---@return number tab_index
 function M.create_new_tab(name, content, conn_name, is_saved)
 	local buf = vim.api.nvim_create_buf(false, true)
-	local conn = conn_name or connection.get_active_name() or "no connection"
+	local conn = conn_name or workbench.conn_name or "no connection"
 
 	local tab_name = name
 	if not tab_name then
@@ -264,16 +277,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	get_sidebar().refresh()
 
 	return #M.query_tabs
-end
-
-function M.cleanup()
-	for _, tab in ipairs(M.query_tabs) do
-		if tab.buf and vim.api.nvim_buf_is_valid(tab.buf) then
-			pcall(vim.api.nvim_buf_delete, tab.buf, { force = true })
-		end
-	end
-	M.query_tabs = {}
-	M.active_tab = 0
 end
 
 return M
