@@ -193,6 +193,66 @@ describe("editable grid", function()
 				assert.is_nil(table_state():find("ADA", 1, true))
 			end)
 
+			it("records the applied statements in the history", function()
+				local history = require("dbab.core.history")
+				history.entries = {}
+
+				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
+				retype(1, "ada", "ADA")
+
+				local statements = editable.statements(wb.result_buf)
+				assert(#statements == 1, "expected one statement")
+
+				local before = #history.get_all()
+
+				local confirm = require("dbab.ui.confirm")
+				local original_show = confirm.show
+				confirm.show = function(_, cb)
+					cb(true)
+				end
+
+				vim.api.nvim_set_current_win(wb.result_win)
+				pcall(vim.cmd, "write")
+				vim.wait(2000, function()
+					return #history.get_all() > before
+				end)
+
+				confirm.show = original_show
+
+				local entries = history.get_all()
+
+				assert.are.equal(before + 1, #entries)
+				assert.are.equal(statements[1], entries[1].query)
+				assert.are.equal(target.name, entries[1].conn_name)
+				assert.are.equal(1, entries[1].row_count)
+			end)
+
+			it("does not record anything when the write is declined", function()
+				local history = require("dbab.core.history")
+				history.entries = {}
+
+				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
+				retype(1, "ada", "ADA")
+
+				local before = #history.get_all()
+
+				local confirm = require("dbab.ui.confirm")
+				local original_show = confirm.show
+				confirm.show = function(_, cb)
+					cb(false)
+				end
+
+				vim.api.nvim_set_current_win(wb.result_win)
+				pcall(vim.cmd, "write")
+				vim.wait(500, function()
+					return false
+				end)
+
+				confirm.show = original_show
+
+				assert.are.equal(before, #history.get_all())
+			end)
+
 			it("leaves other rows alone", function()
 				run("SELECT id, name, note FROM dbab_edit ORDER BY id;")
 				retype(1, "ada", "ADA")

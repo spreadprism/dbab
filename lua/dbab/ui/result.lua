@@ -512,14 +512,13 @@ function M.setup_editing(buf, result, spans, header_offset)
 	local connection = require("dbab.core.connection")
 
 	local conn_name, url = workbench.get_active_connection_context()
-	local _ = conn_name
 
 	if not url then
 		editable.detach(buf)
 		return
 	end
 
-	local state = editable.analyze(M.last_query or "", url, connection.parse_type(url), result)
+	local state = editable.analyze(M.last_query or "", url, connection.parse_type(url), result, conn_name)
 	editable.attach(buf, state, spans, header_offset)
 
 	if state.editable then
@@ -598,7 +597,9 @@ function M.commit(buf)
 			return
 		end
 
+		local started = vim.loop.hrtime()
 		local ok, apply_err = editable.apply(buf, statements)
+		local elapsed = (vim.loop.hrtime() - started) / 1e6
 
 		if not ok then
 			-- The buffer stays dirty and the anchors stay put: the user's edits
@@ -609,6 +610,36 @@ function M.commit(buf)
 
 		vim.bo[buf].modified = false
 		vim.notify(("[dbab] Applied %d statement%s"):format(#statements, #statements == 1 and "" or "s"))
+
+		-- Written statements belong in the history like any other executed SQL:
+		-- one entry each, so a single UPDATE can be reviewed, copied or re-run on
+		-- its own. The timing is shared across the batch -- they went in one
+		-- payload -- and each touched exactly one row, or the guard would have
+		-- aborted the write.
+		local history = require("dbab.core.history")
+		local conn_name = state.conn_name or (origin and origin.conn_name) or "unknown"
+
+		for index = #statements, 1, -1 do
+			history.add({
+				query = statements[index],
+				timestamp = os.time(),
+				conn_name = conn_name,
+				duration_ms = index == 1 and elapsed or nil,
+				row_count = 1,
+			})
+		end
+
+		-- Rendering goes through the facade, so only repaint when this workbench
+		-- is still the one on screen.
+		if
+			origin
+			and not origin.closed
+			and workbench.current() == origin
+			and origin.history_win
+			and vim.api.nvim_win_is_valid(origin.history_win)
+		then
+			require("dbab.ui.history").render()
+		end
 
 		-- Re-run the original query: triggers, defaults and coercions mean other
 		-- cells may have changed, and it rebuilds the anchors. Only safe while

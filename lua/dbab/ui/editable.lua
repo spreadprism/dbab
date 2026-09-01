@@ -24,6 +24,7 @@ local NS_CELL = vim.api.nvim_create_namespace("dbab_cells")
 ---@class Dbab.EditState
 ---@field buf number
 ---@field url string
+---@field conn_name string|nil
 ---@field db_type string
 ---@field query string
 ---@field editable boolean
@@ -67,10 +68,12 @@ end
 ---@param url string
 ---@param db_type string
 ---@param result Dbab.QueryResult
+---@param conn_name string|nil
 ---@return Dbab.EditState
-function M.analyze(query, url, db_type, result)
+function M.analyze(query, url, db_type, result, conn_name)
 	local state = {
 		url = url,
+		conn_name = conn_name,
 		db_type = db_type,
 		query = query,
 		editable = false,
