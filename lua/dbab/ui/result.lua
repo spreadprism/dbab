@@ -124,22 +124,6 @@ local function apply_highlights(bufnr, result, widths, has_header)
 	end
 end
 
---- Each client announces failure differently:
----   postgres  ERROR:  relation "nope" does not exist
----   mysql     ERROR 1146 (42S02) at line 1: Table 'db.nope' doesn't exist
----   sqlite3   Error: no such table: nope
-local ERROR_PATTERNS = {
-	"^ERROR:",
-	"\nERROR:",
-	"^ERROR %d+ ",
-	"\nERROR %d+ ",
-	"^Error: ",
-	"\nError: ",
-	"^Parse error",
-	"\nParse error",
-	"syntax error",
-}
-
 --- Dialect of the active connection, so the parser does not have to guess the
 --- output format from the text alone.
 ---@return string|nil
@@ -157,12 +141,7 @@ end
 ---@param raw string
 ---@return boolean
 local function is_error_result(raw)
-	for _, pattern in ipairs(ERROR_PATTERNS) do
-		if raw:match(pattern) then
-			return true
-		end
-	end
-	return false
+	return require("dbab.core.executor").is_error(raw)
 end
 
 ---@param raw string

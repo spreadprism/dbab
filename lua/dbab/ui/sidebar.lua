@@ -573,8 +573,13 @@ function M.toggle_node()
 						return
 					end
 
+					local failures = {}
+
 					for _, sch in ipairs(schemas) do
-						schema.get_tables_async(url, sch.name, function(_, _)
+						schema.get_tables_async(url, sch.name, function(_, table_err)
+							if table_err then
+								table.insert(failures, sch.name)
+							end
 							pending = pending - 1
 							if pending <= 0 then
 								M.is_loading = false
@@ -584,7 +589,18 @@ function M.toggle_node()
 								M.expanded[node.name .. ".tables"] = true
 								M.refresh()
 								workbench.refresh_history()
-								vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
+
+								if #failures > 0 then
+									vim.notify(
+										"[dbab] Connected to "
+											.. node.name
+											.. ", but could not load tables for: "
+											.. table.concat(failures, ", "),
+										vim.log.levels.WARN
+									)
+								else
+									vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
+								end
 							end
 						end)
 					end

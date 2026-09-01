@@ -51,6 +51,11 @@ function M.warmup(callback, url)
 	-- Load schemas first (async)
 	schema.get_schemas_async(target_url, function(schemas, err)
 		if err or #schemas == 0 then
+			-- Warmup runs on connect, so a silent failure here is exactly the
+			-- "empty sidebar and no explanation" case.
+			if err then
+				vim.notify("[dbab] Schema cache warmup failed: " .. tostring(err), vim.log.levels.ERROR)
+			end
 			M.is_loading_flag = false
 			if callback then
 				callback()

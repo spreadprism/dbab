@@ -13,7 +13,7 @@ local executor = require("dbab.core.executor")
 local parser = require("dbab.utils.parser")
 local schema = require("dbab.core.schema")
 
-local ADMIN_URL = os.getenv("DBAB_TEST_MYSQL_URL") or "mysql://root:mysql@127.0.0.1:3306/mysql"
+local ADMIN_URL = os.getenv("DBAB_TEST_MYSQL_URL") or "mysql://root:root@127.0.0.1:3306/testdb"
 local TEST_DB = "dbab_integration_test"
 local TEST_TABLE = "widgets"
 

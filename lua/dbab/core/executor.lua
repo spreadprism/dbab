@@ -42,12 +42,63 @@ function M.strip_noise(output)
 	return table.concat(kept, "\n")
 end
 
+--- How each client announces failure. Kept here rather than in the UI so that
+--- every consumer -- result pane, schema browser, completion -- agrees on what
+--- an error looks like.
+---   postgres  ERROR:  relation "nope" does not exist
+---   mysql     ERROR 1146 (42S02) at line 1: Table 'db.nope' doesn't exist
+---             ERROR 2005 (HY000): Unknown MySQL server host 'nope' (-2)
+---   sqlite3   Error: no such table: nope
+local ERROR_PATTERNS = {
+	"^ERROR:",
+	"\nERROR:",
+	"^ERROR %d+ ",
+	"\nERROR %d+ ",
+	"^Error: ",
+	"\nError: ",
+	"^Parse error",
+	"\nParse error",
+	"syntax error",
+}
+
+--- Does this output represent a failure rather than a result set?
+---@param raw string|nil
+---@return boolean
+function M.is_error(raw)
+	if raw == nil or raw == "" then
+		return false
+	end
+
+	for _, pattern in ipairs(ERROR_PATTERNS) do
+		if raw:match(pattern) then
+			return true
+		end
+	end
+
+	return false
+end
+
+--- A non-zero exit with nothing to show for it still has to say something, or
+--- the pane renders "No results returned" and the failure is lost entirely.
+---@param output string
+---@param code number
+---@param command string
+---@return string
+local function ensure_message(output, code, command)
+	if code ~= 0 and vim.trim(output or "") == "" then
+		return string.format("ERROR: %s exited with status %d (no output)", command, code)
+	end
+
+	return output
+end
+
 --- Shared completion path for both async backends.
 ---@param stdout string[]
 ---@param stderr string[]
 ---@param code number
+---@param command string
 ---@param callback fun(result: string, err: string|nil)
-local function finish_job(stdout, stderr, code, callback)
+local function finish_job(stdout, stderr, code, command, callback)
 	vim.schedule(function()
 		local result = M.strip_noise(table.concat(stdout, "\n"))
 		local err = #stderr > 0 and M.strip_noise(table.concat(stderr, "\n")) or nil
@@ -57,7 +108,13 @@ local function finish_job(stdout, stderr, code, callback)
 			err = nil
 		end
 
-		if code ~= 0 and err then
+		-- Clients report query errors on stderr, so a failure with no stderr
+		-- still has to be reported from whatever we do have.
+		if code ~= 0 and err == nil then
+			err = ensure_message(result, code, command)
+		end
+
+		if code ~= 0 then
 			callback("", err)
 		else
 			callback(result, nil)
@@ -83,7 +140,9 @@ local function cli_execute(url, query)
 
 	-- Use list form to avoid shell expansion (e.g. '?' in URLs under zsh)
 	local lines = vim.fn.systemlist(cmd_list, query)
-	return M.strip_noise(table.concat(lines, "\n"))
+	local code = vim.v.shell_error
+
+	return ensure_message(M.strip_noise(table.concat(lines, "\n")), code, command)
 end
 
 ---@param url string
@@ -123,7 +182,7 @@ local function cli_execute_async(url, query, callback)
 			end
 		end,
 		on_exit = function(_, return_val)
-			finish_job(stdout_results, stderr_results, return_val, callback)
+			finish_job(stdout_results, stderr_results, return_val, command, callback)
 		end,
 	}):start()
 end
@@ -169,7 +228,10 @@ end
 local function dadbod_execute(url, query)
 	local cmd = dadbod_get_cmd(url)
 	local lines = vim.fn["db#systemlist"](cmd, query)
-	return M.strip_noise(table.concat(lines, "\n"))
+	local code = vim.v.shell_error
+	local name = type(cmd) == "table" and cmd[1] or tostring(cmd)
+
+	return ensure_message(M.strip_noise(table.concat(lines, "\n")), code, name)
 end
 
 ---@param url string
@@ -229,7 +291,7 @@ local function dadbod_execute_async(url, query, callback)
 			end
 		end,
 		on_exit = function(_, return_val)
-			finish_job(stdout_results, stderr_results, return_val, callback)
+			finish_job(stdout_results, stderr_results, return_val, command, callback)
 		end,
 	}):start()
 end
@@ -250,8 +312,12 @@ function M.execute(url, query)
 	end)
 
 	if not ok then
-		vim.notify("[dbab] Query execution failed: " .. tostring(result), vim.log.levels.ERROR)
-		return ""
+		-- Returned as output rather than swallowed: an empty string reaches the
+		-- result pane as "No results returned", which tells the user nothing
+		-- about a client that could not be built or launched at all.
+		local message = tostring(result):gsub("^.*:%d+: ", "")
+		vim.notify("[dbab] Query execution failed: " .. message, vim.log.levels.ERROR)
+		return "ERROR: " .. message
 	end
 
 	return result or ""

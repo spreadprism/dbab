@@ -11,6 +11,22 @@ local cache = {
 
 ---@param url string
 ---@return table
+--- Surface a client failure instead of caching it as an empty schema list.
+--- Without this the sidebar just stays empty and the user is told nothing.
+---@param raw string
+---@param what string
+---@return boolean handled
+local function report_error(raw, what)
+	if not executor.is_error(raw) then
+		return false
+	end
+
+	local first_line = vim.split(vim.trim(raw), "\n")[1] or raw
+	vim.notify(("[dbab] Failed to %s: %s"):format(what, first_line), vim.log.levels.ERROR)
+
+	return true
+end
+
 local function get_url_cache(url)
 	if not cache.by_url[url] then
 		cache.by_url[url] = {
@@ -133,6 +149,10 @@ function M.get_schemas(url)
 	end
 
 	local result = executor.execute(url, query)
+	if report_error(result, "load schemas") then
+		return {}
+	end
+
 	url_cache.schemas = M.parse_schemas(result)
 	return url_cache.schemas
 end
@@ -233,6 +253,10 @@ function M.get_tables(url, schema_name)
 	end
 
 	local result = executor.execute(url, query)
+	if report_error(result, "load tables for " .. schema_name) then
+		return {}
+	end
+
 	url_cache.tables[schema_name] = M.parse_tables(result, db_type)
 	return url_cache.tables[schema_name]
 end
@@ -367,6 +391,10 @@ function M.get_columns(url, table_name)
 	end
 
 	local result = executor.execute(url, query)
+	if report_error(result, "load columns for " .. table_name) then
+		return {}
+	end
+
 	url_cache.columns[table_name] = M.parse_columns(result, db_type)
 	return url_cache.columns[table_name]
 end
