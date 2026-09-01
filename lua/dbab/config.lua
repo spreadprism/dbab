@@ -37,6 +37,7 @@ M.defaults = {
 	},
 	editor = {
 		show_tabbar = true,
+		upper_keywords = true,
 	},
 	result = {
 		max_width = 120,

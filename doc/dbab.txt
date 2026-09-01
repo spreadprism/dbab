@@ -132,12 +132,15 @@ sidebar ~
     - `show_brand_name`: Show DB type label like [postgres] (default: false)
     - `show_system_schemas`: Show system schemas like pg_catalog (default: true)
 
-                                                            *dbab-config-editor*
+                                                             *dbab-config-editor*
 editor ~
     Editor configuration.
     Type: `Dbab.EditorConfig`
 
     - `show_tabbar`: Show tab bar above editor (default: true)
+    - `upper_keywords`: Uppercase SQL keywords when leaving insert mode
+      (default: true). Uses the `sql` treesitter parser if available, so strings,
+      comments, identifiers, and quoted names are untouched.
 
                                                             *dbab-config-result*
 result ~

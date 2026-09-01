@@ -33,7 +33,8 @@
 ---@field show_system_schemas boolean Show system schemas (pg_catalog, information_schema)
 
 ---@class Dbab.EditorConfig
----@field show_tabbar boolean Show tab bar above editor (default true)
+---@field show_tabbar boolean Show the tab bar above the editor
+---@field upper_keywords? boolean Uppercase SQL keywords on leaving insert mode
 
 ---@alias Dbab.HeaderAlign "fit"|"full"
 

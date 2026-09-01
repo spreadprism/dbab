@@ -272,6 +272,7 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	end
 
 	workbench.setup_editor_keymaps(buf)
+	require("dbab.ui.keywords").attach(buf)
 
 	M.refresh_tabbar()
 	get_sidebar().refresh()
