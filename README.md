@@ -405,7 +405,7 @@ Groups marked with **(computed)** are always recalculated based on your colorsch
 | `DbabRowOdd` | **(computed)** | Odd row background |
 | `DbabRowEven` | **(computed)** | Even row background |
 | `DbabHeader` | **(computed)** | Result header (from `Function` fg) |
-| `DbabSeparator` | `Comment` | Result separator lines |
+| `DbabSeparator` | **(computed)** | Column separators (`Comment` fg, never italic) |
 | `DbabCellActive` | `CursorLine` | Active cell |
 
 ### Window

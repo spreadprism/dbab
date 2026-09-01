@@ -62,6 +62,24 @@ function M.setup()
 	local header_bg = func_hl.fg and string.format("#%06x", func_hl.fg) or "#61afef"
 	vim.api.nvim_set_hl(0, "DbabHeader", { bg = header_bg, fg = "#000000", bold = true })
 
+	-- Column separators take Comment's colour but none of its attributes.
+	--
+	-- Linking would inherit them, and most colourschemes make comments italic --
+	-- which slants the one glyph in the grid whose whole job is to be a straight
+	-- vertical line, and makes the columns look crooked.
+	if vim.tbl_isempty(vim.api.nvim_get_hl(0, { name = "DbabSeparator" })) then
+		local comment_hl = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
+		vim.api.nvim_set_hl(0, "DbabSeparator", {
+			fg = comment_hl.fg and string.format("#%06x", comment_hl.fg) or nil,
+			italic = false,
+			bold = false,
+			underline = false,
+			undercurl = false,
+			strikethrough = false,
+			reverse = false,
+		})
+	end
+
 	local highlights = {
 		-- Window
 		DbabFloat = { link = "NormalFloat" },
@@ -69,7 +87,7 @@ function M.setup()
 		DbabTitle = { link = "Title" },
 
 		-- Grid
-		DbabSeparator = { link = "Comment" },
+		-- Separator is set below, not linked: see the comment there.
 		DbabCellActive = { link = "CursorLine" },
 
 		-- Data Types

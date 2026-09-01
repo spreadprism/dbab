@@ -383,7 +383,7 @@ RESULT                                                *dbab-highlights-result*
     `DbabRowOdd`        Odd row background (computed)       ~Normal bg - 10
     `DbabRowEven`       Even row background (computed)      ~Normal bg + 5
     `DbabHeader`        Result header row (computed)        Function fg bg
-    `DbabSeparator`     Result separator lines              Comment
+    `DbabSeparator`     Column separators (never italic)    (computed)
     `DbabCellActive`    Active cell highlight               CursorLine
 
 WINDOW                                                *dbab-highlights-window*
