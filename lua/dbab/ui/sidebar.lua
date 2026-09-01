@@ -57,15 +57,6 @@ setmetatable(M, {
 	end,
 })
 
-local db_hl_map = {
-	postgres = "DbabIconPostgres",
-	mysql = "DbabIconMysql",
-	mariadb = "DbabIconMariadb",
-	sqlite = "DbabIconSqlite",
-	redis = "DbabIconRedis",
-	mongodb = "DbabIconMongodb",
-}
-
 ---@param depth number
 ---@return string
 local function indent(depth)
@@ -90,275 +81,251 @@ local function render_tree()
 	local lines = {}
 	local sidebar_width = 30
 
-	-- A workbench is pinned to one connection, so its explorer shows that tree
-	-- and nothing else.
-	local connections = connection.list_connections()
+	-- The workbench is already pinned to one connection, so the tree starts at
+	-- that connection's sections rather than repeating its name as a root.
 	local pinned = wb().conn_name
+	local conn = nil
 
-	if pinned and pinned ~= "" then
-		connections = vim.tbl_filter(function(conn)
-			return conn.name == pinned
-		end, connections)
-	end
-
-	if #connections == 0 then
-		table.insert(lines, "No connections configured")
-		table.insert(lines, "Press 'a' to add connection")
-		M.nodes = {}
-		return lines
+	for _, candidate in ipairs(connection.list_connections()) do
+		if candidate.name == pinned then
+			conn = candidate
+			break
+		end
 	end
 
 	M.nodes = {}
 
-	for _, conn in ipairs(connections) do
-		local is_active = conn.name == pinned
-		local is_expanded = M.expanded[conn.name]
+	if not conn then
+		table.insert(lines, "No connection")
+		return lines
+	end
 
-		local sidebar_cfg = config.get().sidebar
-		local resolved_url = connection.resolve_url(conn.url)
-		local db_type = connection.parse_type(resolved_url)
-		local conn_icon = sidebar_cfg.use_brand_icon and icons.db(db_type) or icons.db_default
-		local conn_label = sidebar_cfg.show_brand_name and (" [" .. db_type .. "] ") or " "
-		local conn_text = conn_icon .. conn_label .. conn.name
-		local conn_status
-		if M.is_loading and conn.name == M.loading_conn_name then
-			conn_status = icons.loading .. " loading"
-		elseif is_active then
-			conn_status = icons.connected .. " connected"
-		else
-			conn_status = icons.idle .. " idle"
-		end
-		table.insert(lines, pad_right(conn_text, sidebar_width - #conn_status - 1, conn_status))
-		table.insert(M.nodes, {
-			type = "connection",
-			name = conn.name,
-			expanded = is_expanded,
-			depth = 0,
-			---@diagnostic disable-next-line: undefined-field
-			db_type = db_type,
-		})
+	if M.is_loading then
+		table.insert(lines, icons.loading .. " loading " .. conn.name .. "...")
+		table.insert(M.nodes, { type = "loading", name = conn.name, expanded = false, depth = 0 })
+		return lines
+	end
 
-		local conn_url = connection.resolve_url(conn.url)
+	local conn_url = connection.resolve_url(conn.url)
 
-		if is_expanded and conn_url then
-			local open_tabs = workbench.query_tabs or {}
-			local unsaved_buffers = {}
-			local open_saved_map = {}
-			for idx, tab in ipairs(open_tabs) do
-				if tab.conn_name == conn.name then
-					if tab.is_saved then
-						open_saved_map[tab.name] = { tab_index = idx, modified = tab.modified }
-					else
-						table.insert(unsaved_buffers, { tab = tab, tab_index = idx })
-					end
+	if conn_url then
+		local open_tabs = workbench.query_tabs or {}
+		local unsaved_buffers = {}
+		local open_saved_map = {}
+		for idx, tab in ipairs(open_tabs) do
+			if tab.conn_name == conn.name then
+				if tab.is_saved then
+					open_saved_map[tab.name] = { tab_index = idx, modified = tab.modified }
+				else
+					table.insert(unsaved_buffers, { tab = tab, tab_index = idx })
 				end
 			end
+		end
 
-			local saved_queries = storage.list_queries(conn.name)
+		local saved_queries = storage.list_queries(conn.name)
 
-			-- Buffers folder
-			local buffers_key = conn.name .. ".buffers"
-			local buffers_expanded = M.expanded[buffers_key]
-			local buffers_text = indent(1) .. icons.open_buffer .. " buffers"
-			local buffers_suffix = "(" .. #unsaved_buffers .. ")"
-			table.insert(lines, pad_right(buffers_text, sidebar_width - #buffers_suffix - 1, buffers_suffix))
+		-- Buffers folder
+		local buffers_key = conn.name .. ".buffers"
+		local buffers_expanded = M.expanded[buffers_key]
+		local buffers_text = indent(0) .. icons.open_buffer .. " buffers"
+		local buffers_suffix = "(" .. #unsaved_buffers .. ")"
+		table.insert(lines, pad_right(buffers_text, sidebar_width - #buffers_suffix - 1, buffers_suffix))
+		table.insert(M.nodes, {
+			type = "buffers",
+			name = "buffers",
+			expanded = buffers_expanded,
+			depth = 0,
+			parent = conn.name,
+		})
+
+		if buffers_expanded then
+			table.insert(lines, indent(1) .. icons.new_action .. " new")
 			table.insert(M.nodes, {
-				type = "buffers",
-				name = "buffers",
-				expanded = buffers_expanded,
+				type = "new_query_action",
+				name = "new",
+				expanded = false,
 				depth = 1,
 				parent = conn.name,
 			})
 
-			if buffers_expanded then
-				table.insert(lines, indent(2) .. icons.new_action .. " new")
+			for _, entry in ipairs(unsaved_buffers) do
+				table.insert(lines, indent(1) .. icons.open_buffer .. " " .. entry.tab.name)
 				table.insert(M.nodes, {
-					type = "new_query_action",
-					name = "new",
+					type = "open_buffer",
+					name = entry.tab.name,
 					expanded = false,
-					depth = 2,
+					depth = 1,
+					parent = conn.name,
+					tab_index = entry.tab_index,
+				})
+			end
+		end
+
+		-- Saved queries folder
+		local saved_key = conn.name .. ".saved"
+		local saved_expanded = M.expanded[saved_key]
+		local saved_text = indent(0) .. icons.saved_queries .. " saved queries"
+		local saved_suffix = "(" .. #saved_queries .. ")"
+		table.insert(lines, pad_right(saved_text, sidebar_width - #saved_suffix - 1, saved_suffix))
+		table.insert(M.nodes, {
+			type = "saved_queries",
+			name = "saved queries",
+			expanded = saved_expanded,
+			depth = 0,
+			parent = conn.name,
+		})
+
+		if saved_expanded then
+			for _, query in ipairs(saved_queries) do
+				local open_info = open_saved_map[query.name]
+				local qi = (open_info and open_info.modified) and icons.query_modified or icons.query_file
+				table.insert(lines, indent(1) .. qi .. " " .. query.name)
+				table.insert(M.nodes, {
+					type = "saved_query",
+					name = query.name,
+					expanded = false,
+					depth = 1,
+					parent = conn.name,
+					query_path = query.path,
+					tab_index = open_info and open_info.tab_index or nil,
+				})
+			end
+		end
+
+		-- Schema/table content
+		do
+			local schema_db_type = connection.parse_type(conn_url)
+			local db_schemas = schema.get_schemas(conn_url)
+
+			if schema_db_type == "mysql" or schema_db_type == "sqlite" then
+				local tables_key = conn.name .. ".tables"
+				local tables_expanded = M.expanded[tables_key]
+				local all_tables = {}
+				local total_count = 0
+
+				if #db_schemas > 0 then
+					if tables_expanded then
+						all_tables = schema.get_tables(conn_url, db_schemas[1].name)
+						total_count = #all_tables
+					else
+						total_count = db_schemas[1].table_count
+					end
+				end
+
+				local tables_text = indent(0) .. icons.tables .. " tables"
+				local tables_suffix = "(" .. total_count .. ")"
+				table.insert(lines, pad_right(tables_text, sidebar_width - #tables_suffix - 1, tables_suffix))
+				table.insert(M.nodes, {
+					type = "tables",
+					name = "tables",
+					expanded = tables_expanded,
+					depth = 0,
 					parent = conn.name,
 				})
 
-				for _, entry in ipairs(unsaved_buffers) do
-					table.insert(lines, indent(2) .. icons.open_buffer .. " " .. entry.tab.name)
-					table.insert(M.nodes, {
-						type = "open_buffer",
-						name = entry.tab.name,
-						expanded = false,
-						depth = 2,
-						parent = conn.name,
-						tab_index = entry.tab_index,
-					})
-				end
-			end
+				if tables_expanded then
+					for _, tbl in ipairs(all_tables) do
+						local tbl_key = conn.name .. "." .. tbl.name
+						local tbl_expanded = M.expanded[tbl_key]
+						local type_icon = tbl.type == "view" and icons.view or icons.tbl
 
-			-- Saved queries folder
-			local saved_key = conn.name .. ".saved"
-			local saved_expanded = M.expanded[saved_key]
-			local saved_text = indent(1) .. icons.saved_queries .. " saved queries"
-			local saved_suffix = "(" .. #saved_queries .. ")"
-			table.insert(lines, pad_right(saved_text, sidebar_width - #saved_suffix - 1, saved_suffix))
-			table.insert(M.nodes, {
-				type = "saved_queries",
-				name = "saved queries",
-				expanded = saved_expanded,
-				depth = 1,
-				parent = conn.name,
-			})
+						table.insert(lines, indent(1) .. type_icon .. " " .. tbl.name)
+						table.insert(M.nodes, {
+							type = tbl.type,
+							name = tbl.name,
+							expanded = tbl_expanded,
+							depth = 1,
+							parent = conn.name,
+							schema = nil,
+						})
 
-			if saved_expanded then
-				for _, query in ipairs(saved_queries) do
-					local open_info = open_saved_map[query.name]
-					local qi = (open_info and open_info.modified) and icons.query_modified or icons.query_file
-					table.insert(lines, indent(2) .. qi .. " " .. query.name)
-					table.insert(M.nodes, {
-						type = "saved_query",
-						name = query.name,
-						expanded = false,
-						depth = 2,
-						parent = conn.name,
-						query_path = query.path,
-						tab_index = open_info and open_info.tab_index or nil,
-					})
-				end
-			end
+						if tbl_expanded then
+							local columns = schema.get_columns(conn_url, tbl.name)
+							for _, col in ipairs(columns) do
+								local col_icon = col.is_primary and icons.column_pk or icons.column
+								local type_hint = col.data_type and (" : " .. col.data_type) or ""
 
-			-- Schema/table content
-			do
-				local schema_db_type = connection.parse_type(conn_url)
-				local db_schemas = schema.get_schemas(conn_url)
-
-				if schema_db_type == "mysql" or schema_db_type == "sqlite" then
-					local tables_key = conn.name .. ".tables"
-					local tables_expanded = M.expanded[tables_key]
-					local all_tables = {}
-					local total_count = 0
-
-					if #db_schemas > 0 then
-						if tables_expanded then
-							all_tables = schema.get_tables(conn_url, db_schemas[1].name)
-							total_count = #all_tables
-						else
-							total_count = db_schemas[1].table_count
-						end
-					end
-
-					local tables_text = indent(1) .. icons.tables .. " tables"
-					local tables_suffix = "(" .. total_count .. ")"
-					table.insert(lines, pad_right(tables_text, sidebar_width - #tables_suffix - 1, tables_suffix))
-					table.insert(M.nodes, {
-						type = "tables",
-						name = "tables",
-						expanded = tables_expanded,
-						depth = 1,
-						parent = conn.name,
-					})
-
-					if tables_expanded then
-						for _, tbl in ipairs(all_tables) do
-							local tbl_key = conn.name .. "." .. tbl.name
-							local tbl_expanded = M.expanded[tbl_key]
-							local type_icon = tbl.type == "view" and icons.view or icons.tbl
-
-							table.insert(lines, indent(2) .. type_icon .. " " .. tbl.name)
-							table.insert(M.nodes, {
-								type = tbl.type,
-								name = tbl.name,
-								expanded = tbl_expanded,
-								depth = 2,
-								parent = conn.name,
-								schema = nil,
-							})
-
-							if tbl_expanded then
-								local columns = schema.get_columns(conn_url, tbl.name)
-								for _, col in ipairs(columns) do
-									local col_icon = col.is_primary and icons.column_pk or icons.column
-									local type_hint = col.data_type and (" : " .. col.data_type) or ""
-
-									table.insert(lines, indent(3) .. col_icon .. " " .. col.name .. type_hint)
-									table.insert(M.nodes, {
-										type = "column",
-										name = col.name,
-										expanded = false,
-										depth = 3,
-										data_type = col.data_type,
-										is_primary = col.is_primary,
-										parent = tbl.name,
-										schema = db_schemas[1] and db_schemas[1].name or "main",
-									})
-								end
+								table.insert(lines, indent(2) .. col_icon .. " " .. col.name .. type_hint)
+								table.insert(M.nodes, {
+									type = "column",
+									name = col.name,
+									expanded = false,
+									depth = 2,
+									data_type = col.data_type,
+									is_primary = col.is_primary,
+									parent = tbl.name,
+									schema = db_schemas[1] and db_schemas[1].name or "main",
+								})
 							end
 						end
 					end
-				else
-					local schemas_key = conn.name .. ".schemas"
-					local schemas_expanded = M.expanded[schemas_key]
+				end
+			else
+				local schemas_key = conn.name .. ".schemas"
+				local schemas_expanded = M.expanded[schemas_key]
 
-					local schemas_text = indent(1) .. icons.schemas .. " schemas"
-					local schemas_suffix = "(" .. #db_schemas .. ")"
-					table.insert(lines, pad_right(schemas_text, sidebar_width - #schemas_suffix - 1, schemas_suffix))
-					table.insert(M.nodes, {
-						type = "schemas",
-						name = "schemas",
-						expanded = schemas_expanded,
-						depth = 1,
-						parent = conn.name,
-					})
+				local schemas_text = indent(0) .. icons.schemas .. " schemas"
+				local schemas_suffix = "(" .. #db_schemas .. ")"
+				table.insert(lines, pad_right(schemas_text, sidebar_width - #schemas_suffix - 1, schemas_suffix))
+				table.insert(M.nodes, {
+					type = "schemas",
+					name = "schemas",
+					expanded = schemas_expanded,
+					depth = 0,
+					parent = conn.name,
+				})
 
-					if schemas_expanded then
-						for _, sch in ipairs(db_schemas) do
-							local schema_key = conn.name .. ".schema." .. sch.name
-							local schema_expanded = M.expanded[schema_key]
-							local tables = schema_expanded and schema.get_tables(conn_url, sch.name) or {}
-							local table_count = schema_expanded and #tables or sch.table_count
+				if schemas_expanded then
+					for _, sch in ipairs(db_schemas) do
+						local schema_key = conn.name .. ".schema." .. sch.name
+						local schema_expanded = M.expanded[schema_key]
+						local tables = schema_expanded and schema.get_tables(conn_url, sch.name) or {}
+						local table_count = schema_expanded and #tables or sch.table_count
 
-							local schema_text = indent(2) .. icons.schema_node .. " " .. sch.name
-							local schema_suffix = "(" .. table_count .. ")"
-							table.insert(lines, pad_right(schema_text, sidebar_width - #schema_suffix - 1, schema_suffix))
-							table.insert(M.nodes, {
-								type = "schema",
-								name = sch.name,
-								expanded = schema_expanded,
-								depth = 2,
-								parent = conn.name,
-							})
+						local schema_text = indent(1) .. icons.schema_node .. " " .. sch.name
+						local schema_suffix = "(" .. table_count .. ")"
+						table.insert(lines, pad_right(schema_text, sidebar_width - #schema_suffix - 1, schema_suffix))
+						table.insert(M.nodes, {
+							type = "schema",
+							name = sch.name,
+							expanded = schema_expanded,
+							depth = 1,
+							parent = conn.name,
+						})
 
-							if schema_expanded then
-								for _, tbl in ipairs(tables) do
-									local tbl_key = conn.name .. "." .. sch.name .. "." .. tbl.name
-									local tbl_expanded = M.expanded[tbl_key]
-									local type_icon = tbl.type == "view" and icons.view or icons.tbl
+						if schema_expanded then
+							for _, tbl in ipairs(tables) do
+								local tbl_key = conn.name .. "." .. sch.name .. "." .. tbl.name
+								local tbl_expanded = M.expanded[tbl_key]
+								local type_icon = tbl.type == "view" and icons.view or icons.tbl
 
-									table.insert(lines, indent(3) .. type_icon .. " " .. tbl.name)
-									table.insert(M.nodes, {
-										type = tbl.type,
-										name = tbl.name,
-										expanded = tbl_expanded,
-										depth = 3,
-										parent = conn.name,
-										schema = sch.name,
-									})
+								table.insert(lines, indent(2) .. type_icon .. " " .. tbl.name)
+								table.insert(M.nodes, {
+									type = tbl.type,
+									name = tbl.name,
+									expanded = tbl_expanded,
+									depth = 2,
+									parent = conn.name,
+									schema = sch.name,
+								})
 
-									if tbl_expanded then
-										local columns = schema.get_columns(conn_url, tbl.name)
-										for _, col in ipairs(columns) do
-											local col_icon = col.is_primary and icons.column_pk or icons.column
-											local type_hint = col.data_type and (" : " .. col.data_type) or ""
+								if tbl_expanded then
+									local columns = schema.get_columns(conn_url, tbl.name)
+									for _, col in ipairs(columns) do
+										local col_icon = col.is_primary and icons.column_pk or icons.column
+										local type_hint = col.data_type and (" : " .. col.data_type) or ""
 
-											table.insert(lines, indent(4) .. col_icon .. " " .. col.name .. type_hint)
-											table.insert(M.nodes, {
-												type = "column",
-												name = col.name,
-												expanded = false,
-												depth = 4,
-												data_type = col.data_type,
-												is_primary = col.is_primary,
-												parent = tbl.name,
-												schema = sch.name,
-											})
-										end
+										table.insert(lines, indent(3) .. col_icon .. " " .. col.name .. type_hint)
+										table.insert(M.nodes, {
+											type = "column",
+											name = col.name,
+											expanded = false,
+											depth = 3,
+											data_type = col.data_type,
+											is_primary = col.is_primary,
+											parent = tbl.name,
+											schema = sch.name,
+										})
 									end
 								end
 							end
@@ -383,7 +350,12 @@ function M.refresh()
 	vim.api.nvim_buf_set_option(M.buf, "modifiable", false)
 
 	if M.win and vim.api.nvim_win_is_valid(M.win) then
-		vim.api.nvim_win_set_option(M.win, "winbar", "%#DbabHistoryHeader#" .. icons.header .. " Explorer%*")
+		-- The connection no longer has a row in the tree, so the winbar is where
+		-- you read which database this workbench is pinned to.
+		local conn_name = wb().conn_name
+		local title = conn_name ~= "" and ("Explorer (%s)"):format(conn_name) or "Explorer"
+
+		vim.api.nvim_win_set_option(M.win, "winbar", "%#DbabHistoryHeader#" .. icons.header .. " " .. title .. "%*")
 	end
 
 	M.apply_highlights()
@@ -449,58 +421,10 @@ function M.apply_highlights()
 		end
 		local text_start = icon_start + icon_len + 1
 
-		local status_start = line:find(icons.connected, 1, true) or line:find(icons.idle, 1, true)
 		local loading_start = line:find(icons.loading, 1, true)
 
-		if node.type == "connection" then
-			local use_brand = config.get().sidebar.use_brand_color
-			local db_hl = use_brand and db_hl_map[node.db_type] or nil
-			local default_hl = "DbabIconDb"
-			local tag_end = line:find("] ", 1, true)
-			local name_start = tag_end and (tag_end + 1) or text_start
-
-			local active_hl = db_hl or default_hl
-			local idle_hl = db_hl or default_hl
-
-			if line:find(icons.connected, 1, true) then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, active_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(
-					M.buf,
-					ns,
-					"DbabSidebarText",
-					line_num,
-					name_start,
-					status_start and status_start - 2 or -1
-				)
-				if status_start then
-					vim.api.nvim_buf_add_highlight(
-						M.buf,
-						ns,
-						active_hl,
-						line_num,
-						status_start - 1,
-						status_start + #icons.connected - 1
-					)
-					vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, status_start + #icons.connected, -1)
-				end
-			elseif loading_start then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, active_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, name_start, loading_start - 2)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "WarningMsg", line_num, loading_start - 1, -1)
-			elseif line:find(icons.idle, 1, true) then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, idle_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(
-					M.buf,
-					ns,
-					"DbabSidebarText",
-					line_num,
-					name_start,
-					status_start and status_start - 2 or -1
-				)
-				if status_start then
-					vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, status_start - 1, -1)
-				end
-			end
+		if node.type == "loading" then
+			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, 0, -1)
 		elseif node.type == "buffers" or node.type == "saved_queries" then
 			local folder_hl = node.type == "buffers" and "DbabSidebarIconNewQuery" or "DbabSidebarIconColumn"
 			vim.api.nvim_buf_add_highlight(M.buf, ns, folder_hl, line_num, icon_start, icon_start + icon_len)
@@ -573,108 +497,8 @@ function M.toggle_node()
 
 	local node = M.nodes[node_idx]
 
-	if node.type == "connection" then
-		M.expanded[node.name] = not M.expanded[node.name]
-		if M.expanded[node.name] and not M.loaded then
-			M.is_loading = true
-			M.loading_conn_name = node.name
-			M.loaded = true
-			for _, tab in ipairs(workbench.query_tabs) do
-				if tab.conn_name == "no connection" then
-					tab.conn_name = node.name
-				end
-			end
-			M.refresh()
-
-			-- Captured now, not resolved inside the callbacks: the user can
-			-- switch tabpages (or open another workbench) while the schema load
-			-- is in flight, and this work belongs to the workbench that started
-			-- it. Resolving later would write one workbench's tree into another.
-			local this = wb()
-			local url = this.url
-
-			---@param loading boolean
-			local function set_loading(loading)
-				this.sidebar.is_loading = loading
-				this.sidebar.loading_conn_name = loading and node.name or nil
-			end
-
-			local function expand_defaults()
-				this.sidebar.expanded[node.name] = true
-				this.sidebar.expanded[node.name .. ".buffers"] = true
-				this.sidebar.expanded[node.name .. ".tables"] = true
-			end
-
-			--- Only repaint if this workbench is still the one on screen.
-			local function refresh_if_visible()
-				if workbench.current() == this then
-					M.refresh()
-					workbench.refresh_history()
-				end
-			end
-
-			if url then
-				schema.get_schemas_async(url, function(schemas, err)
-					if this.closed then
-						return
-					end
-
-					if err then
-						vim.notify("[dbab] Schema load error: " .. err, vim.log.levels.ERROR)
-						set_loading(false)
-						refresh_if_visible()
-						return
-					end
-
-					local pending = #schemas
-					if pending == 0 then
-						set_loading(false)
-						expand_defaults()
-						refresh_if_visible()
-						vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
-						return
-					end
-
-					local failures = {}
-
-					for _, sch in ipairs(schemas) do
-						schema.get_tables_async(url, sch.name, function(_, table_err)
-							if this.closed then
-								return
-							end
-
-							if table_err then
-								table.insert(failures, sch.name)
-							end
-
-							pending = pending - 1
-							if pending <= 0 then
-								set_loading(false)
-								expand_defaults()
-								refresh_if_visible()
-
-								if #failures > 0 then
-									vim.notify(
-										"[dbab] Connected to "
-											.. node.name
-											.. ", but could not load tables for: "
-											.. table.concat(failures, ", "),
-										vim.log.levels.WARN
-									)
-								else
-									vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
-								end
-							end
-						end)
-					end
-				end)
-			else
-				M.is_loading = false
-				M.loading_conn_name = nil
-				M.refresh()
-			end
-			return
-		end
+	if node.type == "loading" then
+		return
 	elseif node.type == "buffers" then
 		local key = node.parent .. ".buffers"
 		M.expanded[key] = not M.expanded[key]
@@ -785,6 +609,110 @@ function M.insert_table_query()
 	return nil
 end
 
+--- Load this workbench's schemas.
+---
+--- Used to be triggered by expanding the connection node; that node is gone now
+--- that a workbench only ever shows one connection, so the load happens when
+--- the explorer is set up instead.
+function M.load()
+	local this = wb()
+	local conn_name = this.conn_name
+
+	if conn_name == "" or this.sidebar.loaded then
+		return
+	end
+
+	this.sidebar.loaded = true
+	this.sidebar.is_loading = true
+	this.sidebar.loading_conn_name = conn_name
+
+	for _, tab in ipairs(workbench.query_tabs) do
+		if tab.conn_name == "no connection" then
+			tab.conn_name = conn_name
+		end
+	end
+
+	M.refresh()
+
+	local url = this.url
+
+	---@param loading boolean
+	local function set_loading(loading)
+		this.sidebar.is_loading = loading
+		this.sidebar.loading_conn_name = loading and conn_name or nil
+	end
+
+	local function expand_defaults()
+		this.sidebar.expanded[conn_name] = true
+		this.sidebar.expanded[conn_name .. ".buffers"] = true
+		this.sidebar.expanded[conn_name .. ".tables"] = true
+	end
+
+	--- Only repaint if this workbench is still on screen: the load is async and
+	--- the user may have moved to another tabpage meanwhile.
+	local function refresh_if_visible()
+		if workbench.current() == this then
+			M.refresh()
+			workbench.refresh_history()
+		end
+	end
+
+	if not url then
+		set_loading(false)
+		refresh_if_visible()
+		return
+	end
+
+	schema.get_schemas_async(url, function(schemas, err)
+		if this.closed then
+			return
+		end
+
+		if err then
+			vim.notify("[dbab] Schema load error: " .. err, vim.log.levels.ERROR)
+			set_loading(false)
+			refresh_if_visible()
+			return
+		end
+
+		local pending = #schemas
+		if pending == 0 then
+			set_loading(false)
+			expand_defaults()
+			refresh_if_visible()
+			return
+		end
+
+		local failures = {}
+
+		for _, sch in ipairs(schemas) do
+			schema.get_tables_async(url, sch.name, function(_, table_err)
+				if this.closed then
+					return
+				end
+
+				if table_err then
+					table.insert(failures, sch.name)
+				end
+
+				pending = pending - 1
+				if pending <= 0 then
+					set_loading(false)
+					expand_defaults()
+					refresh_if_visible()
+
+					if #failures > 0 then
+						vim.notify(
+							"[dbab] Connected to " .. conn_name .. ", but could not load tables for: " .. table.concat(failures, ", "),
+							vim.log.levels.WARN
+						)
+					end
+				end
+			end)
+		end
+	end)
+end
+
 ---@param buf number
 ---@param win number
 function M.setup(buf, win)
@@ -809,6 +737,7 @@ function M.setup(buf, win)
 
 	M.setup_keymaps()
 	M.refresh()
+	M.load()
 end
 
 function M.setup_keymaps()
