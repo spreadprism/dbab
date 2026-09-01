@@ -171,12 +171,12 @@ describe("editable grid", function()
 
 				-- The confirmation is asynchronous: run a different query before
 				-- answering it.
-				local original_input = vim.ui.input
-				---@diagnostic disable-next-line: duplicate-set-field
-				vim.ui.input = function(_, cb)
+				local confirm = require("dbab.ui.confirm")
+				local original_show = confirm.show
+				confirm.show = function(_, cb)
 					vim.api.nvim_buf_set_lines(wb.editor_buf, 0, -1, false, { "SELECT id, name FROM dbab_edit2 ORDER BY id;" })
 					query_ui.execute_query()
-					cb("y")
+					cb(true)
 				end
 
 				vim.api.nvim_set_current_win(wb.result_win)
@@ -185,7 +185,7 @@ describe("editable grid", function()
 					return false
 				end)
 
-				vim.ui.input = original_input
+				confirm.show = original_show
 				executor.execute(target.url, "DROP TABLE IF EXISTS dbab_edit2;")
 
 				-- The statements were built against a grid that is no longer on

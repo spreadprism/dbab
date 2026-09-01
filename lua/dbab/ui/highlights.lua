@@ -86,6 +86,9 @@ function M.setup()
 		DbabBorder = { link = "WinSeparator" },
 		DbabTitle = { link = "Title" },
 
+		-- Confirmation float
+		DbabConfirmPrompt = { link = "Question" },
+
 		-- Grid
 		-- Separator is set below, not linked: see the comment there.
 		DbabCellActive = { link = "CursorLine" },

@@ -211,8 +211,8 @@ The winbar shows an "editable" indicator when editing is allowed, or the reason 
 1. Execute a qualifying query
 2. Edit cell values in place using ordinary Vim motions
 3. Press `:w` to apply the changes
-4. dbab shows the exact SQL it will run and asks `Apply N statements? [y/N]`
-5. Confirm with `y` to run the statements behind a one-row guard and re-run the original query
+4. A centred floating window appears showing the generated SQL with syntax highlighting. Confirm with a single keypress: `y`, `Y`, `o`, or `O` to apply; `n`, `N`, `q`, `<Esc>`, or `<C-c>` to cancel. Leaving the window also cancels.
+5. On confirmation, the statements run behind a one-row guard and the original query is re-run
 
 ### Editing Rules and Round-Trip Caveats
 
@@ -441,6 +441,7 @@ Groups marked with **(computed)** are always recalculated based on your colorsch
 | `DbabRowEven` | **(computed)** | Even row background |
 | `DbabHeader` | **(computed)** | Result header (from `Function` fg) |
 | `DbabSeparator` | **(computed)** | Column separators (`Comment` fg, never italic) |
+| `DbabConfirmPrompt` | `Question` | Prompt line in the write-confirmation float |
 | `DbabCellActive` | `CursorLine` | Active cell |
 
 ### Window

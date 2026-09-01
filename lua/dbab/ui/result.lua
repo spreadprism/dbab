@@ -568,20 +568,24 @@ function M.commit(buf)
 		return
 	end
 
-	-- `vim.ui.input` is asynchronous and the world can move under it: the user
-	-- may run another query, switch workbench, or close the pane while the
-	-- prompt is up. Everything the callback needs is captured now, and checked
-	-- for staleness before a single statement runs.
+	-- The confirmation is asynchronous and the world can move under it: the user
+	-- may run another query, switch workbench, or close the pane while it is up.
+	-- Everything the callback needs is captured now, and checked for staleness
+	-- before a single statement runs.
 	local state = editable.state(buf)
 	local origin = workbench.current()
 
 	-- The user sees exactly what will run before anything runs: a mis-escaped
 	-- value becomes a visible statement rather than a silent data change.
-	local preview = table.concat(statements, "\n")
-	local prompt = ("%s\n\nApply %d statement%s? [y/N] "):format(preview, #statements, #statements == 1 and "" or "s")
+	local lines = {}
+	for _, statement in ipairs(statements) do
+		vim.list_extend(lines, vim.split(statement, "\n"))
+	end
 
-	vim.ui.input({ prompt = prompt }, function(answer)
-		if answer == nil or not answer:lower():match("^y") then
+	local prompt = ("Apply %d statement%s?"):format(#statements, #statements == 1 and "" or "s")
+
+	require("dbab.ui.confirm").show({ lines = lines, prompt = prompt, lang = "sql" }, function(confirmed)
+		if not confirmed then
 			vim.notify("[dbab] Write cancelled", vim.log.levels.INFO)
 			return
 		end
