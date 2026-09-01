@@ -24,6 +24,7 @@ A lightweight database client for Neovim. Query databases directly from your edi
 - **Result viewer**: Multiple display styles (table, json, vertical, markdown, raw) with type-aware highlighting
 - **Sticky header**: Column names stay pinned while you scroll through results
 - **Editable results**: edit cells in place and `:w` to generate, confirm and apply `UPDATE` and `DELETE` statements
+- **Lifecycle hooks**: run a proxy or tunnel before a connection opens and tear it down when the tab closes
 
 ## Layout
 
@@ -190,6 +191,79 @@ require("blink.cmp").setup({
 
 ### Query History
 ![Query History](./screenshots/history.png)
+
+## Connection hooks
+
+dbab can run hooks around a workbench's connection lifecycle. Four events fire when opening or closing a connection:
+
+- `pre_open` — before the connection is opened / the tab is built. May refuse, which aborts the open.
+- `post_open` — after the workbench is built.
+- `pre_close` — before the workbench is torn down.
+- `post_close` — after the workbench is torn down.
+
+The motivating use case is an SSH tunnel or cloud SQL proxy that must be up before the first query and torn down when the tab goes away.
+
+### Configuration
+
+Hooks can be set globally under `hooks = { ... }` in `setup()`, and/or per connection under a connection's `hooks = { ... }` key. Global hooks run first, then the connection's own. Each event accepts a single function or a list of functions, run in order.
+
+```lua
+require("dbab").setup({
+  connections = {
+    {
+      name = "prod",
+      url = "postgres://localhost:5433/app",
+      hooks = {
+        -- Asynchronous: declare a second parameter and call it when ready.
+        pre_open = function(ctx, done)
+          local task = require("overseer").new_task({
+            cmd = { "cloud-sql-proxy", "my-project:region:instance", "--port", "5433" },
+          })
+          task:start()
+          vim.defer_fn(function() done(true) end, 2000)
+        end,
+        post_close = function(ctx)
+          vim.fn.system({ "pkill", "-f", "cloud-sql-proxy" })
+        end,
+      },
+    },
+  },
+  hooks = {
+    -- Runs for every connection, before the per-connection hooks.
+    post_open = function(ctx)
+      vim.notify("dbab: opened " .. ctx.conn_name)
+    end,
+  },
+})
+```
+
+### Hook Signature
+
+Hooks can be synchronous or asynchronous:
+
+- **Synchronous**: `function(ctx)` — runs immediately
+- **Asynchronous**: `function(ctx, done)` — must call `done(true)` to continue or `done(false, "reason")` to refuse
+
+Only `pre_open` can refuse. A synchronous hook can refuse by returning `false`, and an error raised in `pre_open` counts as a refusal. When a hook refuses, the workbench is not opened.
+
+### Context
+
+The `ctx` parameter is a table with:
+
+| Field | Type | Present | Description |
+|-------|------|---------|-------------|
+| `conn_name` | string | always | Connection name |
+| `url` | string | always | Resolved database URL |
+| `db_type` | string | always | Database type (postgres, mysql, mariadb, sqlite) |
+| `event` | string | always | Event name (pre_open, post_open, pre_close, post_close) |
+| `workbench` | object | post_open, close events | The workbench object |
+
+### Rules
+
+- Only `pre_open` can refuse. A synchronous hook can also refuse by returning `false`, and an error raised in `pre_open` counts as a refusal. When it refuses, the workbench is not opened.
+- Close hooks cannot veto — closing must always be possible. A failing close hook is reported and the teardown continues.
+- Hooks do NOT re-run when you focus an already-open workbench; they only fire on a real open.
+- The close hooks run on every teardown path: `:DbabClose`, `:tabclose`, and closing the sidebar window. They run exactly once.
 
 ## Editing results
 

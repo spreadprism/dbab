@@ -18,10 +18,28 @@
 ---@field history Dbab.HistoryConfig
 ---@field keymaps Dbab.Keymaps
 ---@field highlights? table<string, table> Highlight group overrides (nvim_set_hl opts)
+---@field hooks? Dbab.HooksConfig Connection lifecycle hooks (all connections)
+
+---@alias Dbab.HookEvent "pre_open"|"post_open"|"pre_close"|"post_close"
+---@alias Dbab.Hook fun(ctx: Dbab.HookContext, done?: fun(ok: boolean, err?: string))
+
+---@class Dbab.HookContext
+---@field conn_name string Connection the workbench is pinned to
+---@field url string|nil Resolved connection URL
+---@field db_type string|nil
+---@field event Dbab.HookEvent
+---@field workbench table|nil Present for post_open and the close events
+
+---@class Dbab.HooksConfig
+---@field pre_open? Dbab.Hook|Dbab.Hook[] Before the connection is opened; may refuse
+---@field post_open? Dbab.Hook|Dbab.Hook[] After the workbench is built
+---@field pre_close? Dbab.Hook|Dbab.Hook[] Before the workbench is torn down
+---@field post_close? Dbab.Hook|Dbab.Hook[] After the workbench is torn down
 
 ---@class Dbab.Connection
 ---@field name string Connection display name
 ---@field url string Database connection URL (supports env vars like $DATABASE_URL)
+---@field hooks? Dbab.HooksConfig Lifecycle hooks for this connection only
 
 ---@alias Dbab.ResultStyle "table"|"json"|"raw"|"vertical"|"markdown"
 

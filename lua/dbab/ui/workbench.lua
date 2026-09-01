@@ -1,5 +1,6 @@
 local connection = require("dbab.core.connection")
 local config = require("dbab.config")
+local hooks = require("dbab.core.hooks")
 
 local result = require("dbab.ui.result")
 local keymaps = require("dbab.ui.keymaps")
@@ -415,13 +416,61 @@ end
 --- Focus the workbench pinned to `conn_name`, building it if needed.
 ---@param conn_name string
 ---@return Dbab.Workbench|nil
-function M.open_for(conn_name)
+--- Focus the workbench pinned to `conn_name`, building it if needed.
+---
+--- Returns the workbench directly when nothing has to happen first. With a
+--- `pre_open` hook configured the work is asynchronous -- a tunnel or proxy has
+--- to be up before the first query -- so the result arrives via `callback` and
+--- the return value is nil.
+---@param conn_name string
+---@param callback? fun(wb: Dbab.Workbench|nil)
+---@return Dbab.Workbench|nil
+function M.open_for(conn_name, callback)
+	callback = callback or function() end
+
 	local url = connection.get_resolved_url_by_name(conn_name)
 	if not url then
 		vim.notify(("[dbab] Unknown connection: %s"):format(tostring(conn_name)), vim.log.levels.ERROR)
+		callback(nil)
 		return nil
 	end
 
+	local existing = registry[conn_name]
+	local is_focus_only = existing
+		and existing:is_open()
+		and existing.sidebar_win
+		and vim.api.nvim_win_is_valid(existing.sidebar_win)
+		and existing.editor_win
+		and vim.api.nvim_win_is_valid(existing.editor_win)
+		and existing.result_win
+		and vim.api.nvim_win_is_valid(existing.result_win)
+
+	-- Focusing a workbench that is already up is not opening a connection, so
+	-- the hooks must not run again.
+	if not is_focus_only and hooks.has("pre_open", conn_name) then
+		hooks.run("pre_open", { conn_name = conn_name, url = url, db_type = connection.parse_type(url) }, function(ok, err)
+			if not ok then
+				vim.notify(("[dbab] Not opening %s: %s"):format(conn_name, tostring(err)), vim.log.levels.ERROR)
+				callback(nil)
+				return
+			end
+
+			callback(M._build(conn_name, url))
+		end)
+
+		return nil
+	end
+
+	local wb = M._build(conn_name, url)
+	callback(wb)
+
+	return wb
+end
+
+---@param conn_name string
+---@param url string
+---@return Dbab.Workbench|nil
+function M._build(conn_name, url)
 	local wb = registry[conn_name]
 
 	if wb and wb:is_open() then
@@ -531,6 +580,13 @@ function M.open_for(conn_name)
 	end
 
 	M._setup_autocmds(wb)
+
+	hooks.run("post_open", {
+		conn_name = wb.conn_name,
+		url = wb.url,
+		db_type = wb.db_type,
+		workbench = wb,
+	}, function() end)
 
 	return wb
 end
@@ -771,6 +827,21 @@ function Workbench:cleanup()
 	end
 	self.closed = true
 
+	-- Runs on every teardown path -- `:DbabClose`, `:tabclose`, closing the
+	-- sidebar window -- because a proxy started for this connection has to come
+	-- down however the tab went away. `pre_close` cannot veto: closing must
+	-- always be possible.
+	local context = {
+		conn_name = self.conn_name,
+		url = self.url,
+		db_type = self.db_type,
+		workbench = self,
+	}
+
+	if self.conn_name ~= "" then
+		hooks.run("pre_close", context, function() end)
+	end
+
 	if self.augroup then
 		pcall(vim.api.nvim_del_augroup_by_id, self.augroup)
 		self.augroup = nil
@@ -824,6 +895,10 @@ function Workbench:cleanup()
 
 	if last_focused == self then
 		last_focused = nil
+	end
+
+	if self.conn_name ~= "" then
+		hooks.run("post_close", context, function() end)
 	end
 end
 

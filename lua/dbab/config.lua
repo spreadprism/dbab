@@ -108,6 +108,7 @@ M.defaults = {
 		},
 	},
 	highlights = {},
+	hooks = {},
 }
 
 ---@type Dbab.Config|nil

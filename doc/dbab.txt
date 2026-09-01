@@ -9,9 +9,10 @@ CONTENTS                                                        *dbab-contents*
     4. Configuration ........................... |dbab-configuration|
     5. Commands ................................ |dbab-commands|
     6. Keymaps ................................. |dbab-keymaps|
-    7. Editing ................................. |dbab-editing|
-    8. Highlights .............................. |dbab-highlights|
-    9. Types ................................... |dbab-types|
+    7. Hooks ................................... |dbab-hooks|
+    8. Editing ................................. |dbab-editing|
+    9. Highlights .............................. |dbab-highlights|
+    10. Types .................................. |dbab-types|
 
 ==============================================================================
 INTRODUCTION                                                *dbab-introduction*
@@ -373,6 +374,93 @@ RESULT KEYMAPS                                            *dbab-keymaps-result*
     `<Tab>`             Move focus to sidebar
     `<S-Tab>`           Move focus to editor
     `q`                 Close dbab
+
+==============================================================================
+HOOKS                                                              *dbab-hooks*
+
+dbab can run hooks around a workbench's connection lifecycle. Four events fire
+when opening or closing a connection:
+
+- `pre_open`  — before the connection is opened / the tab is built. May refuse,
+  which aborts the open.
+- `post_open` — after the workbench is built.
+- `pre_close` — before the workbench is torn down.
+- `post_close` — after the workbench is torn down.
+
+The motivating use case is an SSH tunnel or cloud SQL proxy that must be up
+before the first query and torn down when the tab goes away.
+
+CONFIGURATION                                                  *dbab-config-hooks*
+
+Hooks can be set globally under `hooks = { ... }` in `setup()`, and/or per
+connection under a connection's `hooks = { ... }` key. Global hooks run first,
+then the connection's own. Each event accepts a single function or a list of
+functions, run in order: >lua
+
+    require("dbab").setup({
+      connections = {
+        {
+          name = "prod",
+          url = "postgres://localhost:5433/app",
+          hooks = {
+            -- Asynchronous: declare a second parameter and call it when ready.
+            pre_open = function(ctx, done)
+              local task = require("overseer").new_task({
+                cmd = { "cloud-sql-proxy", "my-project:region:instance", "--port", "5433" },
+              })
+              task:start()
+              vim.defer_fn(function() done(true) end, 2000)
+            end,
+            post_close = function(ctx)
+              vim.fn.system({ "pkill", "-f", "cloud-sql-proxy" })
+            end,
+          },
+        },
+      },
+      hooks = {
+        -- Runs for every connection, before the per-connection hooks.
+        post_open = function(ctx)
+          vim.notify("dbab: opened " .. ctx.conn_name)
+        end,
+      },
+    })
+<
+
+HOOK SIGNATURE                                           *dbab-hooks-signature*
+
+Hooks can be synchronous or asynchronous:
+
+- Synchronous: `function(ctx)` — runs immediately
+- Asynchronous: `function(ctx, done)` — must call `done(true)` to continue or
+  `done(false, "reason")` to refuse
+
+Only `pre_open` can refuse. A synchronous hook can refuse by returning `false`,
+and an error raised in `pre_open` counts as a refusal. When a hook refuses, the
+workbench is not opened.
+
+HOOK CONTEXT                                              *dbab-hooks-context*
+
+The `ctx` parameter is a table with the following fields:
+
+    `conn_name` (string)     Connection name (always present)
+    `url` (string)           Resolved database URL (always present)
+    `db_type` (string)       Database type: postgres, mysql, mariadb, sqlite
+    `event` (string)         Event name: pre_open, post_open, pre_close,
+                             post_close
+    `workbench` (object)     The workbench object (present for post_open and
+                             close events)
+
+HOOK RULES                                                  *dbab-hooks-rules*
+
+- Only `pre_open` can refuse. A synchronous hook can also refuse by returning
+  `false`, and an error raised in `pre_open` counts as a refusal. When it
+  refuses, the workbench is not opened.
+- Close hooks cannot veto — closing must always be possible. A failing close
+  hook is reported and the teardown continues.
+- Hooks do NOT re-run when you focus an already-open workbench; they only fire
+  on a real open.
+- The close hooks run on every teardown path: `:DbabClose`, `:tabclose`, and
+  closing the sidebar window. They run exactly once.
 
 ==============================================================================
 EDITING                                                          *dbab-editing*
