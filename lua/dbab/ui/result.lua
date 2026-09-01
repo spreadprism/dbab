@@ -583,75 +583,78 @@ function M.commit(buf)
 
 	local prompt = ("Apply %d statement%s?"):format(#statements, #statements == 1 and "" or "s")
 
-	require("dbab.ui.confirm").show({ lines = lines, prompt = prompt, lang = "sql" }, function(confirmed)
-		if not confirmed then
-			vim.notify("[dbab] Write cancelled", vim.log.levels.INFO)
-			return
+	require("dbab.ui.confirm").show(
+		{ lines = lines, prompt = prompt, lang = "sql", count = #statements },
+		function(confirmed)
+			if not confirmed then
+				vim.notify("[dbab] Write cancelled", vim.log.levels.INFO)
+				return
+			end
+
+			if not vim.api.nvim_buf_is_valid(buf) or editable.state(buf) ~= state then
+				-- A different result now occupies this buffer. The statements were
+				-- built against the old one, so running them would write on behalf of
+				-- a grid the user is no longer looking at.
+				vim.notify("[dbab] Result changed while confirming; nothing was written", vim.log.levels.WARN)
+				return
+			end
+
+			local started = vim.loop.hrtime()
+			local ok, apply_err = editable.apply(buf, statements)
+			local elapsed = (vim.loop.hrtime() - started) / 1e6
+
+			if not ok then
+				-- The buffer stays dirty and the anchors stay put: the user's edits
+				-- must not be silently discarded because the write failed.
+				vim.notify("[dbab] Write failed: " .. tostring(apply_err), vim.log.levels.ERROR)
+				return
+			end
+
+			vim.bo[buf].modified = false
+			vim.notify(("[dbab] Applied %d statement%s"):format(#statements, #statements == 1 and "" or "s"))
+
+			-- Written statements belong in the history like any other executed SQL:
+			-- one entry each, so a single UPDATE can be reviewed, copied or re-run on
+			-- its own. The timing is shared across the batch -- they went in one
+			-- payload -- and each touched exactly one row, or the guard would have
+			-- aborted the write.
+			local history = require("dbab.core.history")
+			local conn_name = state.conn_name or (origin and origin.conn_name) or "unknown"
+
+			for index = #statements, 1, -1 do
+				history.add({
+					query = statements[index],
+					timestamp = os.time(),
+					conn_name = conn_name,
+					duration_ms = index == 1 and elapsed or nil,
+					row_count = 1,
+				})
+			end
+
+			-- Rendering goes through the facade, so only repaint when this workbench
+			-- is still the one on screen.
+			if
+				origin
+				and not origin.closed
+				and workbench.current() == origin
+				and origin.history_win
+				and vim.api.nvim_win_is_valid(origin.history_win)
+			then
+				require("dbab.ui.history").render()
+			end
+
+			-- Re-run the original query: triggers, defaults and coercions mean other
+			-- cells may have changed, and it rebuilds the anchors. Only safe while
+			-- the originating workbench is still the one on screen, since rendering
+			-- goes through the facade.
+			if origin and not origin.closed and workbench.current() == origin then
+				local raw = require("dbab.core.executor").execute(state.url, state.query)
+				M.show_result(raw, 0)
+			else
+				vim.notify("[dbab] Re-run the query to see the updated rows", vim.log.levels.INFO)
+			end
 		end
-
-		if not vim.api.nvim_buf_is_valid(buf) or editable.state(buf) ~= state then
-			-- A different result now occupies this buffer. The statements were
-			-- built against the old one, so running them would write on behalf of
-			-- a grid the user is no longer looking at.
-			vim.notify("[dbab] Result changed while confirming; nothing was written", vim.log.levels.WARN)
-			return
-		end
-
-		local started = vim.loop.hrtime()
-		local ok, apply_err = editable.apply(buf, statements)
-		local elapsed = (vim.loop.hrtime() - started) / 1e6
-
-		if not ok then
-			-- The buffer stays dirty and the anchors stay put: the user's edits
-			-- must not be silently discarded because the write failed.
-			vim.notify("[dbab] Write failed: " .. tostring(apply_err), vim.log.levels.ERROR)
-			return
-		end
-
-		vim.bo[buf].modified = false
-		vim.notify(("[dbab] Applied %d statement%s"):format(#statements, #statements == 1 and "" or "s"))
-
-		-- Written statements belong in the history like any other executed SQL:
-		-- one entry each, so a single UPDATE can be reviewed, copied or re-run on
-		-- its own. The timing is shared across the batch -- they went in one
-		-- payload -- and each touched exactly one row, or the guard would have
-		-- aborted the write.
-		local history = require("dbab.core.history")
-		local conn_name = state.conn_name or (origin and origin.conn_name) or "unknown"
-
-		for index = #statements, 1, -1 do
-			history.add({
-				query = statements[index],
-				timestamp = os.time(),
-				conn_name = conn_name,
-				duration_ms = index == 1 and elapsed or nil,
-				row_count = 1,
-			})
-		end
-
-		-- Rendering goes through the facade, so only repaint when this workbench
-		-- is still the one on screen.
-		if
-			origin
-			and not origin.closed
-			and workbench.current() == origin
-			and origin.history_win
-			and vim.api.nvim_win_is_valid(origin.history_win)
-		then
-			require("dbab.ui.history").render()
-		end
-
-		-- Re-run the original query: triggers, defaults and coercions mean other
-		-- cells may have changed, and it rebuilds the anchors. Only safe while
-		-- the originating workbench is still the one on screen, since rendering
-		-- goes through the facade.
-		if origin and not origin.closed and workbench.current() == origin then
-			local raw = require("dbab.core.executor").execute(state.url, state.query)
-			M.show_result(raw, 0)
-		else
-			vim.notify("[dbab] Re-run the query to see the updated rows", vim.log.levels.INFO)
-		end
-	end)
+	)
 end
 
 function M.yank_current_row()

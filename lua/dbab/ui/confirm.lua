@@ -15,13 +15,18 @@ local ZINDEX = 152
 local CONFIRM_KEYS = { "y", "Y", "o", "O" }
 local CANCEL_KEYS = { "n", "N", "q", "<Esc>", "<C-c>" }
 
+--- How many body lines to show at once. The rest are scrolled to, rather than
+--- growing the window until it swallows the screen.
+local MAX_VISIBLE = 5
+
 ---@class Dbab.ConfirmOpts
 ---@field lines string[] Body of the prompt
----@field prompt string Question shown under the body
+---@field prompt string Question shown in the title
 ---@field lang string|nil Treesitter language for the body
+---@field count number|nil How many things the body describes, for the footer
 ---@field min_width number|nil
 ---@field max_width number|nil
----@field max_height number|nil
+---@field max_visible number|nil
 
 --- Hide the cursor while the float is up: there is nothing to point at, and a
 --- block cursor sitting on the SQL reads as an editing affordance it is not.
@@ -63,19 +68,33 @@ end
 ---@param callback fun(confirmed: boolean)
 M.show = vim.schedule_wrap(function(opts, callback)
 	local body = vim.deepcopy(opts.lines)
+	if #body == 0 then
+		callback(false)
+		return
+	end
 
-	local widest = vim.api.nvim_strwidth(opts.prompt)
+	local widest = 0
 	for _, line in ipairs(body) do
 		widest = math.max(widest, vim.api.nvim_strwidth(line))
 	end
 
 	local min_width = opts.min_width or 40
 	local max_width = opts.max_width or math.floor(vim.o.columns * 0.8)
-	local max_height = opts.max_height or math.floor(vim.o.lines * 0.6)
+	local max_visible = opts.max_visible or MAX_VISIBLE
 
 	local width = math.max(min_width, math.min(widest + 2, max_width))
-	-- Body, a blank line, and the prompt.
-	local height = math.min(#body + 2, max_height)
+	-- Capped rather than fitted: a hundred statements must not open a hundred
+	-- line window. Everything past the cap is scrolled to.
+	local height = math.min(#body, max_visible)
+	local hidden = #body - height
+
+	local count = opts.count or #body
+	local footer = " [y]es  [n]o "
+	if hidden > 0 then
+		footer = (" [y]es  [n]o  ·  %d of %d shown, scroll for more "):format(height, count)
+	elseif count > 1 then
+		footer = (" [y]es  [n]o  ·  %d "):format(count)
+	end
 
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[buf].bufhidden = "wipe"
@@ -91,9 +110,10 @@ M.show = vim.schedule_wrap(function(opts, callback)
 		col = math.floor((vim.o.columns - width) / 2),
 		style = "minimal",
 		border = "rounded",
-		title = " dbab ",
+		-- The question lives in the border so it stays visible while scrolling.
+		title = " " .. opts.prompt .. " ",
 		title_pos = "center",
-		footer = " [y]es  [n]o ",
+		footer = footer,
 		footer_pos = "center",
 		zindex = ZINDEX,
 	})
@@ -104,18 +124,9 @@ M.show = vim.schedule_wrap(function(opts, callback)
 		return
 	end
 
-	-- The prompt sits below the body as virtual lines, so it cannot be confused
-	-- with the SQL and is not part of the highlighted region.
-	local ns = vim.api.nvim_create_namespace("dbab_confirm")
-	vim.api.nvim_buf_set_extmark(buf, ns, math.max(#body - 1, 0), 0, {
-		virt_lines = {
-			{ { "", "Normal" } },
-			{ { opts.prompt, "DbabConfirmPrompt" } },
-		},
-	})
-
 	vim.wo[win].wrap = false
 	vim.wo[win].cursorline = false
+	vim.wo[win].scrolloff = 0
 	vim.bo[buf].modifiable = false
 
 	local restore_cursor = hide_cursor()

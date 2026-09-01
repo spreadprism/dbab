@@ -11,7 +11,9 @@ describe("confirm float", function()
 	local function open(lines)
 		answered = nil
 
-		confirm.show({ lines = lines, prompt = "Apply 1 statement?", lang = "sql" }, function(ok)
+		local prompt = ("Apply %d statement%s?"):format(#lines, #lines == 1 and "" or "s")
+
+		confirm.show({ lines = lines, prompt = prompt, lang = "sql", count = #lines }, function(ok)
 			answered = ok
 		end)
 
@@ -147,5 +149,116 @@ describe("confirm float", function()
 
 		assert.is_true(first)
 		assert.is_nil(answered)
+	end)
+
+	describe("many statements", function()
+		---@param n number
+		---@return string[]
+		local function statements(n)
+			local lines = {}
+			for i = 1, n do
+				lines[i] = ("UPDATE t SET a = %d WHERE id = %d;"):format(i, i)
+			end
+			return lines
+		end
+
+		---@param cfg vim.api.keyset.win_config
+		---@param key string
+		---@return string
+		local function border_text(cfg, key)
+			local value = cfg[key]
+			if type(value) ~= "table" then
+				return tostring(value)
+			end
+
+			local parts = {}
+			for _, chunk in ipairs(value) do
+				table.insert(parts, chunk[1])
+			end
+
+			return table.concat(parts)
+		end
+
+		it("keeps every statement in the buffer", function()
+			local _, buf = open(statements(7))
+
+			assert.are.equal(7, vim.api.nvim_buf_line_count(buf))
+
+			press("n")
+		end)
+
+		it("shows at most five at a time", function()
+			local win = open(statements(7))
+
+			assert.are.equal(5, vim.api.nvim_win_get_config(win).height)
+
+			press("n")
+		end)
+
+		it("fits the window to the content when it is short", function()
+			local win = open(statements(3))
+
+			assert.are.equal(3, vim.api.nvim_win_get_config(win).height)
+
+			press("n")
+		end)
+
+		it("names the total in the title so it cannot be missed", function()
+			local win = open(statements(7))
+
+			assert.is_not_nil(border_text(vim.api.nvim_win_get_config(win), "title"):find("7", 1, true))
+
+			press("n")
+		end)
+
+		it("says so in the footer when statements are off screen", function()
+			local win = open(statements(7))
+			local footer = border_text(vim.api.nvim_win_get_config(win), "footer")
+
+			assert.is_not_nil(footer:find("5 of 7", 1, true))
+			assert.is_not_nil(footer:find("scroll", 1, true))
+
+			press("n")
+		end)
+
+		it("does not claim anything is hidden when it all fits", function()
+			local win = open(statements(4))
+			local footer = border_text(vim.api.nvim_win_get_config(win), "footer")
+
+			assert.is_nil(footer:find("scroll", 1, true))
+
+			press("n")
+		end)
+
+		it("scrolls to the statements below the fold", function()
+			local win = open(statements(7))
+
+			assert.are.equal(1, vim.fn.line("w0", win))
+			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-d>", true, false, true), "x", false)
+			assert.is_true(vim.fn.line("w0", win) > 1)
+
+			press("n")
+		end)
+
+		it("still answers with one key while scrolled", function()
+			open(statements(7))
+
+			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-d>", true, false, true), "x", false)
+			press("y")
+
+			assert.is_true(answered)
+		end)
+
+		it("refuses an empty body rather than opening a blank window", function()
+			local called
+			confirm.show({ lines = {}, prompt = "Apply?" }, function(ok)
+				called = ok
+			end)
+			vim.wait(200, function()
+				return called ~= nil
+			end)
+
+			assert.is_false(called)
+		end)
 	end)
 end)
