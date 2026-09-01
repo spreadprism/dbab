@@ -2,6 +2,127 @@
 
 local M = {}
 
+--- The column separator.
+---
+--- ASCII, not a box-drawing character: `|` is one byte and one display column,
+--- so for ASCII data a byte offset equals a screen column. `\u{2502}` is three
+--- bytes for one column, which forces every offset calculation to carry two
+--- measures from the very first character. Keeping it ASCII confines that
+--- divergence to non-ASCII *data* (see `render_row`), and the result survives
+--- being yanked into a terminal or a commit message.
+M.SEPARATOR = "|"
+
+--- Must match `core/adapter.lua`'s `NULL_SENTINEL`.
+M.NULL_SENTINEL = "\\N"
+
+--- How a value is printed.
+---
+--- `vim.NIL` rather than a Lua `nil`: a real nil leaves a hole in the row array,
+--- so `#row` stops short and every cell after a null falls out of alignment
+--- with `columns`.
+---@param value any
+---@return string
+function M.display(value)
+	if value == nil or value == vim.NIL then
+		return "NULL"
+	end
+
+	return tostring(value)
+end
+
+--- Turn a client's null sentinel back into a value.
+---
+--- `vim.NIL` and not `nil`: a real nil leaves a hole in the row array, so `#row`
+--- stops short and every cell after a null falls out of alignment with
+--- `columns`. That bites the moment a nullable column appears anywhere but last.
+---@param cell string
+---@param db_type? string
+---@return string|userdata
+function M.to_value(cell, db_type)
+	if cell == M.NULL_SENTINEL then
+		return vim.NIL
+	end
+
+	-- MySQL cannot be given a sentinel; batch mode prints a bare `NULL`, which
+	-- is therefore indistinguishable from the four-character string 'NULL'.
+	if db_type == "mysql" and cell == "NULL" then
+		return vim.NIL
+	end
+
+	return cell
+end
+
+--- Make a value safe to put in a buffer line.
+---
+--- `nvim_buf_set_lines` rejects newlines and carriage returns outright, a tab
+--- renders as a variable-width jump, and a control character prints as `^X` --
+--- two columns for one byte. Any of them desynchronises width from bytes and
+--- destroys the grid.
+---@param text string
+---@return string
+function M.sanitize(text)
+	text = text:gsub("\r\n", " "):gsub("[\r\n]", " "):gsub("\t", " ")
+	text = text:gsub("%c", " ")
+
+	return text
+end
+
+--- Render one row, and report where each cell landed.
+---
+--- Each cell is padded to its column width and carries a space on *both* sides;
+--- columns are joined with a single separator and nothing else. The space you
+--- see either side of the pipe belongs to the neighbouring cells.
+---
+--- The spans come back with the line because this is the only place that knows
+--- the layout: padding is measured in display cells, while extmarks and
+--- `nvim_buf_get_text` are addressed in bytes. Having callers re-derive the
+--- geometry is how highlights end up a character off.
+---@param cells any[]
+---@param widths number[]
+---@return string line
+---@return {from: number, to: number}[] spans Byte offsets, 0-indexed, `to` exclusive
+function M.render_row(cells, widths)
+	local out = {}
+	local spans = {}
+	local bytes = 0
+
+	for index, cell in ipairs(cells) do
+		local text = M.sanitize(M.display(cell))
+		local pad = math.max((widths[index] or 0) - vim.fn.strdisplaywidth(text), 0)
+
+		-- `to` excludes the padding: the spaces between a short value and the
+		-- separator belong to no cell, and a number should not have a
+		-- highlighted tail.
+		spans[index] = { from = bytes + 1, to = bytes + 1 + #text }
+
+		table.insert(out, (" %s%s "):format(text, string.rep(" ", pad)))
+		bytes = bytes + 1 + #text + pad + 1 + #M.SEPARATOR
+	end
+
+	return table.concat(out, M.SEPARATOR), spans
+end
+
+--- The inverse of the offset walk: which column is a byte column inside?
+---@param widths number[]
+---@param col number 0-indexed byte column, as `nvim_win_get_cursor` reports it
+---@return number|nil index, number|nil from, number|nil to
+function M.column_at(widths, col)
+	local column = 0
+
+	for index = 1, #widths do
+		local from = column + 1
+		local to = from + widths[index]
+
+		if col < to + 1 then
+			return index, from, to
+		end
+
+		column = to + 1 + #M.SEPARATOR
+	end
+
+	return nil
+end
+
 ---@param raw string Raw output from database
 ---@param style? Dbab.ResultStyle "table" (default), "json", "raw", "vertical", "markdown"
 ---@param db_type? string Dialect hint ("mysql", "postgres", "sqlite")
@@ -30,7 +151,8 @@ function M.parse(raw, style, db_type)
 		for _, row in ipairs(table_result.rows) do
 			local item = {}
 			for i, col in ipairs(table_result.columns) do
-				item[col] = row[i] or ""
+				-- vim.NIL encodes as JSON null, which is what it means.
+				item[col] = row[i] ~= nil and row[i] or vim.NIL
 			end
 			table.insert(json_data, item)
 		end
@@ -66,7 +188,7 @@ function M.parse(raw, style, db_type)
 			table.insert(lines, string.format("-[ RECORD %d ]%s", idx, string.rep("-", 16)))
 			for i, col in ipairs(table_result.columns) do
 				local padded = col .. string.rep(" ", col_width - #col)
-				table.insert(lines, string.format("%s | %s", padded, row[i] or ""))
+				table.insert(lines, string.format("%s | %s", padded, M.display(row[i])))
 			end
 		end
 
@@ -98,8 +220,9 @@ function M.parse(raw, style, db_type)
 		for _, row in ipairs(table_result.rows) do
 			local row_parts = {}
 			for i, cell in ipairs(row) do
-				local w = widths[i] or #cell
-				table.insert(row_parts, " " .. cell .. string.rep(" ", w - #cell) .. " ")
+				local text = M.display(cell)
+				local w = widths[i] or #text
+				table.insert(row_parts, " " .. text .. string.rep(" ", w - #text) .. " ")
 			end
 			table.insert(lines, "|" .. table.concat(row_parts, "|") .. "|")
 		end
@@ -154,10 +277,17 @@ function M.parse_table(raw, db_type)
 
 	if is_tab_separated then
 		result.columns = vim.split(header_line, "\t")
+
+		-- Blank lines are kept: `systemlist` already drops the trailing newline,
+		-- so a remaining empty line is a real row whose single column is an
+		-- empty string. Skipping them loses the row entirely.
 		for i = 2, #lines do
 			local line = lines[i]
-			if line ~= "" then
+			do
 				local row = vim.split(line, "\t")
+				for idx, cell in ipairs(row) do
+					row[idx] = M.to_value(cell, db_type)
+				end
 				table.insert(result.rows, row)
 			end
 		end
@@ -166,10 +296,13 @@ function M.parse_table(raw, db_type)
 	end
 
 	if not separator_line:match("^%-") and not separator_line:match("^%+") then
+		-- Unstructured output (notably sqlite3, which prints no header). Still
+		-- worth turning the sentinel into a real null so it does not show up as
+		-- a literal backslash-N.
 		result.columns = { "result" }
 		for _, line in ipairs(lines) do
 			if line ~= "" then
-				table.insert(result.rows, { line })
+				table.insert(result.rows, { M.to_value(line, db_type) })
 			end
 		end
 		result.row_count = #result.rows
@@ -208,7 +341,7 @@ function M.parse_table(raw, db_type)
 					cell = line:sub(col_pos.start, math.min(col_pos.finish, #line))
 					cell = vim.trim(cell)
 				end
-				table.insert(row, cell)
+				table.insert(row, M.to_value(cell, db_type))
 			end
 			table.insert(result.rows, row)
 		end
@@ -226,13 +359,16 @@ end
 function M.calculate_column_widths(result)
 	local widths = {}
 
+	-- Measured in DISPLAY CELLS, not bytes, and through `display` so a header is
+	-- measured exactly as it will be printed. `#"Jose\u{301}"` is 5 bytes for 4
+	-- columns; pad by byte length and every separator after it shifts left.
 	for i, col in ipairs(result.columns) do
-		widths[i] = #col
+		widths[i] = vim.fn.strdisplaywidth(M.sanitize(M.display(col)))
 	end
 
 	for _, row in ipairs(result.rows) do
 		for i, cell in ipairs(row) do
-			widths[i] = math.max(widths[i] or 0, #cell)
+			widths[i] = math.max(widths[i] or 0, vim.fn.strdisplaywidth(M.sanitize(M.display(cell))))
 		end
 	end
 

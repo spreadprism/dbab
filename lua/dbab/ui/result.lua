@@ -39,40 +39,44 @@ setmetatable(M, {
 
 ---@param result Dbab.QueryResult
 ---@param widths number[]
----@return string[], boolean has_header
+---@return string[] lines
+---@return boolean has_header
+---@return {from: number, to: number}[][] spans Per line, per column, in bytes
 local function render_result_lines(result, widths)
 	local lines = {}
+	local spans = {}
 	local has_header = #result.columns > 0
 
 	if has_header then
-		local header = ""
-		for i, col in ipairs(result.columns) do
-			local w = widths[i] or #col
-			local padded = col .. string.rep(" ", w - #col)
-			header = header .. " " .. padded .. " "
-		end
-		table.insert(lines, header)
+		local line, header_spans = parser.render_row(result.columns, widths)
+		table.insert(lines, line)
+		table.insert(spans, header_spans)
 	end
 
 	for _, row in ipairs(result.rows) do
-		local line = ""
-		for i, cell in ipairs(row) do
-			local w = widths[i] or #cell
-			local display = cell == "" and "NULL" or cell
-			local padded = display .. string.rep(" ", w - #display)
-			line = line .. " " .. padded .. " "
-		end
+		local line, row_spans = parser.render_row(row, widths)
 		table.insert(lines, line)
+		table.insert(spans, row_spans)
 	end
 
-	return lines, has_header
+	return lines, has_header, spans
 end
 
 ---@param cell string
 ---@return string
 local function detect_cell_hl(cell)
-	if cell == "" or cell:upper() == "NULL" then
+	-- Only a real null is DbabNull. With a sentinel in play the four-character
+	-- string 'NULL' is a distinct value, and it must not look like one.
+	if cell == nil or cell == vim.NIL then
 		return "DbabNull"
+	end
+
+	if type(cell) ~= "string" then
+		cell = tostring(cell)
+	end
+
+	if cell == "" then
+		return "DbabString"
 	elseif cell:match("^%-?%d+%.?%d*$") then
 		return "DbabNumber"
 	elseif cell:match("^[Tt]rue$") or cell:match("^[Ff]alse$") or cell == "t" or cell == "f" then
@@ -92,7 +96,8 @@ end
 ---@param result Dbab.QueryResult
 ---@param widths number[]
 ---@param has_header boolean
-local function apply_highlights(bufnr, result, widths, has_header)
+---@param spans {from: number, to: number}[][] Recorded at render time
+local function apply_highlights(bufnr, result, widths, has_header, spans)
 	local ns = vim.api.nvim_create_namespace("dbab_result")
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
@@ -109,25 +114,32 @@ local function apply_highlights(bufnr, result, widths, has_header)
 		vim.api.nvim_buf_set_extmark(bufnr, ns, line_num, 0, { end_row = line_num + 1, hl_group = row_hl })
 	end
 
+	-- Dim the separators. Their offsets are known from the spans, so the line is
+	-- never re-parsed -- a value may itself contain a pipe, which is exactly why
+	-- splitting the rendered text is forbidden.
+	for line_num = 0, #spans - 1 do
+		local line_spans = spans[line_num + 1]
+		for col_idx = 1, #line_spans - 1 do
+			local sep = line_spans[col_idx + 1].from - 1 - #parser.SEPARATOR
+			vim.api.nvim_buf_set_extmark(bufnr, ns, line_num, sep, {
+				end_col = sep + #parser.SEPARATOR,
+				hl_group = "DbabSeparator",
+			})
+		end
+	end
+
 	for row_idx, row in ipairs(result.rows) do
 		local line_num = row_idx - 1 + header_offset
+		local row_spans = spans[line_num + 1] or {}
 
-		local col_start = 0
 		for col_idx, cell in ipairs(row) do
-			local w = widths[col_idx] or #cell
-			local cell_start = col_start + 1
-			local display = cell == "" and "NULL" or cell
-			local hl_group = detect_cell_hl(cell)
-
-			vim.api.nvim_buf_set_extmark(
-				bufnr,
-				ns,
-				line_num,
-				cell_start,
-				{ end_col = cell_start + #display, hl_group = hl_group }
-			)
-
-			col_start = col_start + w + 2
+			local span = row_spans[col_idx]
+			if span then
+				vim.api.nvim_buf_set_extmark(bufnr, ns, line_num, span.from, {
+					end_col = span.to,
+					hl_group = detect_cell_hl(cell),
+				})
+			end
 		end
 	end
 end
@@ -451,18 +463,19 @@ function M.show_result(raw, elapsed)
 	end
 
 	local widths = parser.calculate_column_widths(result)
-	local lines, has_header = render_result_lines(result, widths)
+	local lines, has_header, spans = render_result_lines(result, widths)
 
 	local grid_width = 0
 	for _, w in ipairs(widths) do
-		grid_width = grid_width + w + 2
+		grid_width = grid_width + w + 2 + #parser.SEPARATOR
 	end
-	M.last_result_width = grid_width
+	-- No trailing separator after the last column.
+	M.last_result_width = math.max(grid_width - #parser.SEPARATOR, 0)
 
 	vim.api.nvim_buf_set_lines(workbench.result_buf, 0, -1, false, lines)
 	vim.bo[workbench.result_buf].modifiable = false
 
-	apply_highlights(workbench.result_buf, result, widths, has_header)
+	apply_highlights(workbench.result_buf, result, widths, has_header, spans)
 
 	-- A new result changes the header text, and the float is not otherwise told.
 	sticky.set_header(workbench._state(), has_header and lines[1] or nil)

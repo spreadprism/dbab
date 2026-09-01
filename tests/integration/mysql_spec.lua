@@ -188,7 +188,20 @@ describe("mysql integration", function()
 			local result = query(("SELECT name, note FROM %s ORDER BY id;"):format(TEST_TABLE))
 
 			assert.are.same({ "widget", "first" }, result.rows[1])
-			assert.are.same({ "gadget", "NULL" }, result.rows[2])
+
+			-- A null comes back as vim.NIL, not as the string "NULL", so it keeps
+			-- its place in the row and renders distinctly.
+			assert.are.equal("gadget", result.rows[2][1])
+			assert.are.equal(vim.NIL, result.rows[2][2])
+			assert.are.equal("NULL", parser.display(result.rows[2][2]))
+		end)
+
+		it("keeps an empty string distinct from NULL", function()
+			run(("UPDATE %s SET note = '' WHERE name = 'widget';"):format(TEST_TABLE))
+
+			local result = query(("SELECT note FROM %s WHERE name = 'widget';"):format(TEST_TABLE))
+
+			assert.are.equal("", result.rows[1][1])
 		end)
 
 		it("filters with a WHERE clause", function()

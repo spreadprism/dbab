@@ -153,12 +153,27 @@ result ~
         - `"raw"`: Raw CLI output
         - `"vertical"`: One column per line (like psql \x)
         - `"markdown"`: Markdown table
-    - `sticky_header`: Pin column header while scrolling (default: true)
-         Only applies to the "table" style.
-    - `focus_on_execute`: Move cursor to result pane after running a
-         query (default: false)
+     - `sticky_header`: Pin column header while scrolling (default: true)
+          Only applies to the "table" style.
+     - `focus_on_execute`: Move cursor to result pane after running a
+          query (default: false)
 
-                                                           *dbab-config-history*
+NULL vs empty string ~
+
+     The table style distinguishes a SQL NULL from an empty string:
+
+     NULL                Rendered as "NULL"        Highlight: DbabNull
+     '' (empty string)   Rendered as blank         Highlight: DbabString
+     'NULL' (string)     Rendered as "NULL"        Highlight: DbabString
+
+     dbab asks the client for a null sentinel (psql --pset=null=\N,
+     sqlite3 -nullvalue \N) to tell them apart. Caveats:
+
+     - MySQL: No equivalent option. In batch mode, a literal 'NULL' string is
+       indistinguishable from a real null.
+     - A value that is exactly \N is read as NULL on PostgreSQL and SQLite.
+
+                                                            *dbab-config-history*
 history ~
     History configuration.
     Type: `Dbab.HistoryConfig`

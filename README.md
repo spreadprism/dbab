@@ -322,6 +322,23 @@ result = {
 },
 ```
 
+#### NULL vs empty string
+
+The table style distinguishes a SQL `NULL` from an empty string:
+
+| Value | Rendered | Highlight |
+|-------|----------|-----------|
+| `NULL` | `NULL` | `DbabNull` |
+| `''` | *(blank)* | `DbabString` |
+| `'NULL'` (a string) | `NULL` | `DbabString` |
+
+dbab asks the client for a null sentinel (`psql --pset=null=\N`,
+`sqlite3 -nullvalue \N`) so the two can be told apart. Two caveats:
+
+- **MySQL** has no equivalent option. In batch mode it prints `NULL` for a real
+  null, so a literal `'NULL'` string is indistinguishable from one.
+- A value that is exactly `\N` is read as NULL on PostgreSQL and SQLite.
+
 #### table
 
 ![style-table](./screenshots/result.png)

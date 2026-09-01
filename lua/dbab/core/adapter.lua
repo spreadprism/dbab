@@ -2,6 +2,18 @@ local connection = require("dbab.core.connection")
 
 local M = {}
 
+--- What the client should print in place of SQL NULL.
+---
+--- Out of the box `NULL` and `''` come back as the same bytes, so an empty
+--- string and a null are indistinguishable. Asking the client for a sentinel is
+--- the only way to tell them apart; it is turned back into `vim.NIL` at parse
+--- time (see `utils/parser.lua`).
+---
+--- MySQL has no equivalent option -- in batch mode it already prints `NULL` for
+--- nulls and nothing for an empty string, so only a literal `'NULL'` string
+--- stays ambiguous there.
+M.NULL_SENTINEL = "\\N"
+
 ---@param url string
 ---@return table parsed { scheme, user, password, host, port, database, params }
 function M.parse_url(url)
@@ -97,7 +109,7 @@ end
 ---@param url string
 ---@return string command, string[] args
 function M._build_postgres(url)
-	return "psql", { url }
+	return "psql", { url, "--pset=null=" .. M.NULL_SENTINEL }
 end
 
 ---@param url string
@@ -145,7 +157,7 @@ end
 ---@return string command, string[] args
 function M._build_sqlite(url)
 	local parsed = M.parse_url(url)
-	return "sqlite3", { parsed.database }
+	return "sqlite3", { "-nullvalue", M.NULL_SENTINEL, parsed.database }
 end
 
 return M
